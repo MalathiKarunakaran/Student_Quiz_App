@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teacher Panel — CSA65 Quiz Management System</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="app-header">
+    <div class="eyebrow">CSA65 · Teacher Panel</div>
+    <h1>Configure a Quiz</h1>
+    <p>Load a question bank, filter it, and generate a shareable student link — no repo changes needed for a quick quiz.</p>
+  </header>
+
+  <div class="card">
+    <h2>1. Load Question Bank</h2>
+    <div class="field">
+      <label>Question Bank JSON Path</label>
+      <input type="text" id="bankPath" value="data/questions-unit1.json">
+    </div>
+    <div class="btn-row">
+      <button class="btn-primary" onclick="initTeacherPanel()">Load Question Bank</button>
+    </div>
+    <div id="bankLoadError"></div>
+    <div id="bankStats" style="font-size:12.5px; color:var(--muted); margin-top:8px;"></div>
+  </div>
+
+  <div class="card" id="filterSection" style="display:none;">
+    <h2>2. Filter Questions</h2>
+
+    <div class="field">
+      <label>Unit</label>
+      <select id="unitSelect" onchange="updateMatchingCount()">
+        <option value="I">Unit I — Fundamentals of Generative AI and LLMs</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Topics</label>
+      <div class="checkbox-grid" id="topicFilters"></div>
+    </div>
+
+    <div class="field">
+      <label>Question Types</label>
+      <div class="checkbox-grid" id="typeFilters"></div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label>Difficulty Levels</label>
+        <div class="checkbox-grid" id="difficultyFilters"></div>
+      </div>
+      <div class="field">
+        <label>Bloom's Taxonomy Levels</label>
+        <div class="checkbox-grid" id="bloomFilters"></div>
+      </div>
+    </div>
+
+    <div id="bankStatsMatching" style="font-size:12.5px; color:var(--teal); font-weight:600; margin:8px 0 4px;"></div>
+    <div id="coStats" style="font-size:12.5px; color:var(--muted); margin:2px 0 4px;"></div>
+  </div>
+
+  <div class="card" id="configSection" style="display:none;">
+    <h2>3. Quiz Settings</h2>
+
+    <div class="grid2">
+      <div class="field">
+        <label>Quiz ID (unique, no spaces)</label>
+        <input type="text" id="quizId" value="csa65-unit1-quiz1">
+      </div>
+      <div class="field">
+        <label>Quiz Title (shown to students)</label>
+        <input type="text" id="quizTitle" value="CSA65 Unit I — Fundamentals of Generative AI and LLMs">
+      </div>
+    </div>
+
+    <div class="grid3">
+      <div class="field">
+        <label>Number of Questions</label>
+        <input type="number" id="numQuestions" value="10" min="1">
+      </div>
+      <div class="field">
+        <label>Time Limit (minutes)</label>
+        <input type="number" id="timeLimit" value="25" min="1">
+      </div>
+      <div class="field">
+        <label>Passing Percentage</label>
+        <input type="number" id="passingPct" value="50" min="0" max="100">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Randomization Mode</label>
+      <select id="randomizationMode">
+        <option value="seeded">Seeded (each student's roll number → same questions every time they open it; different students get different sets)</option>
+        <option value="random">True Random (different every time, even for the same student — maximum variation)</option>
+      </select>
+    </div>
+
+    <div class="grid3">
+      <div class="checkbox-item"><input type="checkbox" id="shuffleOptions" checked> <label style="margin:0;">Shuffle answer options</label></div>
+      <div class="checkbox-item"><input type="checkbox" id="showExplanations" checked> <label style="margin:0;">Show explanations after submit</label></div>
+      <div class="checkbox-item"><input type="checkbox" id="allowReview" checked> <label style="margin:0;">Allow review before final submit</label></div>
+    </div>
+  </div>
+
+  <div class="card" id="generateSection" style="display:none;">
+    <h2>4. Generate</h2>
+    <div class="btn-row">
+      <button class="btn-primary" onclick="generateShareableLink()">Generate Shareable Student Link</button>
+      <button class="btn-secondary" onclick="downloadConfigFile()">Download Config JSON (commit to repo instead)</button>
+    </div>
+    <div id="linkOutput" style="display:none; margin-top:14px;"></div>
+  </div>
+
+  <div class="footnote">
+    <b>Two ways to deliver a quiz:</b> (1) generate a shareable link — the entire config is embedded in the URL, so you can send it out immediately with zero repo changes; or (2) download the config JSON and commit it to <code>data/</code>, then share a link like <code>student.html?configFile=data/your-config.json</code>. See <a href="docs/README.md">docs/README.md</a> for details.
+  </div>
+</div>
+
+<script src="js/data-loader.js"></script>
+<script src="js/teacher-config.js"></script>
+<script>
+  // Reveal remaining sections once a bank is loaded successfully.
+  const originalInit = initTeacherPanel;
+  initTeacherPanel = async function() {
+    await originalInit();
+    if (loadedBank.length > 0) {
+      document.getElementById('configSection').style.display = 'block';
+      document.getElementById('generateSection').style.display = 'block';
+    }
+  };
+</script>
+</body>
+</html>

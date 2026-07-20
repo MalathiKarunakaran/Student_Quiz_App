@@ -1,0 +1,10 @@
+{
+  "_comment": "Optional roster used only to pre-fill the student name when a roll number is entered, and as the seed source for deterministic (seeded) quiz generation. Not required — students can also just type their name/roll manually with no roster file at all.",
+  "students": [
+    { "rollNo": "21CS001", "name": "Student One" },
+    { "rollNo": "21CS002", "name": "Student Two" },
+    { "rollNo": "21CS003", "name": "Student Three" },
+    { "rollNo": "21CS004", "name": "Student Four" },
+    { "rollNo": "21CS005", "name": "Student Five" }
+  ]
+}

@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CSA65 Quiz — Student</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="app-header">
+    <div class="eyebrow">CSA65 · Generative AI and Large Language Models</div>
+    <h1 id="quizTitleHeader">Quiz</h1>
+    <p id="quizSubHeader">Enter your details below to begin.</p>
+  </header>
+
+  <!-- SCREEN 1: Student entry -->
+  <div class="card" id="entryScreen">
+    <h2>Start Quiz</h2>
+    <div class="field">
+      <label>Full Name</label>
+      <input type="text" id="entryName" placeholder="e.g. Priya Sharma">
+    </div>
+    <div class="field">
+      <label>Roll Number</label>
+      <input type="text" id="entryRoll" placeholder="e.g. 21CS045">
+    </div>
+    <div id="entryError"></div>
+    <div class="btn-row">
+      <button class="btn-primary" id="startBtn" onclick="startQuiz()">Start Quiz</button>
+    </div>
+    <div class="footnote">Your roll number determines your specific question set if the instructor configured "seeded" randomization — this ensures fairness while still giving each student a somewhat different quiz.</div>
+  </div>
+
+  <!-- SCREEN 2: Quiz in progress -->
+  <div class="card" id="quizScreen" style="display:none;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+      <span class="timer-badge" id="timerBadge">--:--</span>
+      <span style="font-size:12.5px; color:var(--muted);" id="studentBadge"></span>
+    </div>
+    <div class="progress-bar-outer"><div class="progress-bar-inner" id="progressBarInner" style="width:0%;"></div></div>
+    <div class="progress-label"><span id="progressText">0 of 0 answered</span><span id="progressPercent">0%</span></div>
+    <div id="tabSwitchWarning" style="display:none;"></div>
+
+    <div id="questionContainer"></div>
+
+    <div class="btn-row" style="justify-content:space-between;">
+      <div>
+        <button class="btn-secondary" id="prevBtn" onclick="goPrev()">← Previous</button>
+        <button class="btn-secondary" id="nextBtn" onclick="goNext()">Next →</button>
+      </div>
+      <button class="btn-primary" id="submitBtn" onclick="confirmSubmit()">Submit Quiz</button>
+    </div>
+  </div>
+
+  <!-- SCREEN 3: Results -->
+  <div class="card" id="resultsScreen" style="display:none;">
+    <div class="result-summary">
+      <div class="sub" id="resultQuizTitle"></div>
+      <div class="big-score" id="resultScore">0 / 0</div>
+      <div class="sub" id="resultPercent">0%</div>
+      <div class="sub" id="resultPassFail" style="margin-top:8px; font-weight:700;"></div>
+    </div>
+    <div id="resultReviewNote"></div>
+    <div id="resultBreakdown"></div>
+    <div class="btn-row">
+      <button class="btn-primary" onclick="downloadCSV()">Download Result (CSV)</button>
+      <button class="btn-secondary" onclick="downloadJSON()">Download Result (JSON)</button>
+    </div>
+  </div>
+
+  <div class="footnote">
+    CSA65 Quiz Management System — all scoring happens locally in your browser. Descriptive/scenario/prompt-engineering answers receive a suggested score only; your instructor reviews these before finalizing marks.
+  </div>
+</div>
+
+<script src="js/randomizer.js"></script>
+<script src="js/scorer.js"></script>
+<script src="js/timer.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/data-loader.js"></script>
+<script src="js/code-runner.js"></script>
+<script src="js/question-renderer.js"></script>
+<script src="js/export.js"></script>
+<script src="js/quiz-engine.js"></script>
+<script>
+let lastScoreResult = null;
+let lastMeta = null;
+
+async function startQuiz() {
+  const name = document.getElementById('entryName').value.trim();
+  const roll = document.getElementById('entryRoll').value.trim();
+  const errBox = document.getElementById('entryError');
+  errBox.innerHTML = '';
+
+  if (!name || !roll) {
+    errBox.innerHTML = '<div class="error-box">Please enter both your name and roll number.</div>';
+    return;
+  }
+
+  const startBtn = document.getElementById('startBtn');
+  startBtn.disabled = true;
+  startBtn.textContent = 'Loading...';
+
+  try {
+    const state = await QuizEngine.init(name, roll);
+    document.getElementById('quizTitleHeader').textContent = state.config.quizTitle;
+    document.getElementById('quizSubHeader').textContent =
+      `${state.quiz.length} questions · ${state.config.timeLimitMinutes} minutes · ${state.student.name} (${state.student.rollNo})`;
+    document.getElementById('studentBadge').textContent = `${state.student.name} · ${state.student.rollNo}`;
+
+    document.getElementById('entryScreen').style.display = 'none';
+    document.getElementById('quizScreen').style.display = 'block';
+
+    QuizEngine.setTickHandler(onTimerTick);
+    QuizEngine.setAutoSubmitHandler((result) => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      lastScoreResult = result.scoreResult;
+      lastMeta = result.meta;
+      showResults(result.scoreResult, result.meta, true);
+    });
+    state.timer.start();
+    enableIntegrityGuards();
+
+    renderCurrentQuestion();
+  } catch (e) {
+    errBox.innerHTML = `<div class="error-box">Could not start quiz: ${e.message}</div>`;
+    startBtn.disabled = false;
+    startBtn.textContent = 'Start Quiz';
+  }
+}
+
+/**
+ * Formative-quiz integrity guards. Client-side only, so not a real proctoring
+ * mechanism (see README Security & Limitations) — the goal is visibility for
+ * the instructor and a mild deterrent, not enforcement. Paste is blocked on
+ * every answer field; leaving the tab is logged and shown to the student,
+ * never auto-submitted, so a stray notification can't cost someone their attempt.
+ */
+function enableIntegrityGuards() {
+  document.getElementById('questionContainer').addEventListener('paste', (e) => {
+    const tag = e.target.tagName;
+    if (tag === 'TEXTAREA' || tag === 'INPUT') {
+      e.preventDefault();
+      flashPasteBlocked(e.target);
+    }
+  });
+
+  document.addEventListener('visibilitychange', onVisibilityChange);
+}
+
+function flashPasteBlocked(target) {
+  target.classList.add('paste-blocked');
+  setTimeout(() => target.classList.remove('paste-blocked'), 600);
+}
+
+function onVisibilityChange() {
+  if (document.hidden) {
+    QuizEngine.recordTabSwitch();
+  } else {
+    const count = QuizEngine.getState().tabSwitchCount;
+    if (count > 0) {
+      const box = document.getElementById('tabSwitchWarning');
+      box.style.display = 'block';
+      box.innerHTML = `<div class="error-box">You left the quiz tab (${count} time${count !== 1 ? 's' : ''} so far). This is noted for your instructor.</div>`;
+    }
+  }
+}
+
+function onTimerTick(secondsRemaining) {
+  const badge = document.getElementById('timerBadge');
+  badge.textContent = QuizTimer.formatTime(secondsRemaining);
+  badge.classList.toggle('low-time', secondsRemaining <= 60);
+}
+
+function renderCurrentQuestion() {
+  const state = QuizEngine.getState();
+  const question = QuizEngine.getCurrentQuestion();
+  const container = document.getElementById('questionContainer');
+  container.innerHTML = '';
+  const existingAnswer = state.answers[question.id];
+  const node = QuestionRenderer.render(question, state.currentIndex, state.quiz.length, existingAnswer, (qid, ans) => {
+    QuizEngine.recordAnswer(qid, ans);
+    updateProgress();
+  });
+  container.appendChild(node);
+
+  document.getElementById('prevBtn').disabled = state.currentIndex === 0;
+  document.getElementById('nextBtn').disabled = state.currentIndex === state.quiz.length - 1;
+  updateProgress();
+}
+
+function updateProgress() {
+  const p = QuizEngine.getProgress();
+  document.getElementById('progressBarInner').style.width = p.percent + '%';
+  document.getElementById('progressText').textContent = `${p.answered} of ${p.total} answered`;
+  document.getElementById('progressPercent').textContent = p.percent + '%';
+}
+
+function goNext() { if (QuizEngine.nextQuestion()) renderCurrentQuestion(); }
+function goPrev() { if (QuizEngine.prevQuestion()) renderCurrentQuestion(); }
+
+function confirmSubmit() {
+  const p = QuizEngine.getProgress();
+  const msg = p.answered < p.total
+    ? `You've answered ${p.answered} of ${p.total} questions. Submit anyway?`
+    : 'Submit your quiz now? You cannot change answers after submitting.';
+  if (confirm(msg)) finalizeSubmit(false);
+}
+
+function finalizeSubmit(isAuto) {
+  const result = QuizEngine.submitQuiz(isAuto);
+  if (!result) return;
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+  lastScoreResult = result.scoreResult;
+  lastMeta = result.meta;
+  showResults(result.scoreResult, result.meta, isAuto);
+}
+
+function showResults(scoreResult, meta, wasAutoSubmitted) {
+  document.getElementById('quizScreen').style.display = 'none';
+  document.getElementById('resultsScreen').style.display = 'block';
+
+  document.getElementById('resultQuizTitle').textContent =
+    meta.quizTitle + (wasAutoSubmitted ? '  (auto-submitted — time expired)' : '');
+  document.getElementById('resultScore').textContent = `${scoreResult.totalEarned} / ${scoreResult.totalMax}`;
+  document.getElementById('resultPercent').textContent = `${scoreResult.percentage}%`;
+
+  const config = QuizEngine.getState().config;
+  const passed = scoreResult.percentage >= (config.passingPercentage || 50);
+  const passEl = document.getElementById('resultPassFail');
+  passEl.textContent = passed ? '✓ PASS' : '✗ Below Passing Threshold';
+  passEl.style.color = passed ? '#9FD8CB' : '#FFB4A0';
+
+  const notes = [];
+  if (scoreResult.anyNeedsReview) {
+    notes.push('<div class="error-box" style="background:#FDEBD0; color:#8A5A00;">Some of your answers (descriptive/scenario/prompt-engineering) received a suggested score only. Your instructor will review these before finalizing your grade.</div>');
+  }
+  if (meta.tabSwitchCount > 0) {
+    notes.push(`<div class="error-box">You left the quiz tab ${meta.tabSwitchCount} time${meta.tabSwitchCount !== 1 ? 's' : ''} during this attempt. This is recorded in your result for your instructor.</div>`);
+  }
+  document.getElementById('resultReviewNote').innerHTML = notes.join('');
+
+  const breakdown = document.getElementById('resultBreakdown');
+  breakdown.innerHTML = '';
+  scoreResult.perQuestion.forEach((r, i) => {
+    const question = QuizEngine.getState().quiz[i];
+    const row = document.createElement('div');
+    row.className = 'result-row';
+    let statusHtml;
+    if (r.correct === true) statusHtml = '<span class="badge-correct">✓ Correct</span>';
+    else if (r.correct === false) statusHtml = '<span class="badge-incorrect">✗ Incorrect</span>';
+    else statusHtml = '<span class="badge-review">Pending Review</span>';
+    row.innerHTML = `<span>Q${i + 1}. ${question.topic} (${question.type})</span><span>${statusHtml} — ${r.earned}/${r.max}</span>`;
+    breakdown.appendChild(row);
+    if (config.showExplanationsAfterSubmit && question.explanation) {
+      const exp = document.createElement('div');
+      exp.className = 'explanation-box';
+      exp.textContent = question.explanation;
+      breakdown.appendChild(exp);
+    }
+  });
+}
+
+function downloadCSV() {
+  if (!lastScoreResult) return;
+  Exporter.exportStudentResultCSV(lastScoreResult, lastMeta);
+}
+function downloadJSON() {
+  if (!lastScoreResult) return;
+  Exporter.exportStudentResultJSON(lastScoreResult, lastMeta);
+}
+</script>
+</body>
+</html>

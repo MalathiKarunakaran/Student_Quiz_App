@@ -1,0 +1,174 @@
+{
+  "_comment": "CSA65 Unit I question bank. Each question has: id, unit, topic, type, difficulty, bloom, question, marks, co, and type-specific fields. 'co' maps the question to a Course Outcome from the official syllabus (Unit I = CO1). Questions with 'runnable': true render an in-browser Python editor (Pyodide) instead of a static code block. See docs/README.md 'JSON Schemas' section for the full schema.",
+  "unit": "I",
+  "unitTitle": "Fundamentals of Generative AI and Large Language Models",
+  "questions": [
+    {
+      "id": "u1-mcq-001",
+      "unit": "I", "topic": "Introduction to AI", "type": "mcq", "difficulty": "easy", "bloom": "remember", "marks": 1, "co": "CO1",
+      "question": "The Turing Test, proposed by Alan Turing in 1950, is designed to evaluate a machine's ability to:",
+      "options": ["Perform arithmetic faster than a human", "Exhibit intelligent behavior indistinguishable from a human", "Store more data than a human brain", "Run without electricity"],
+      "correctAnswer": 1,
+      "explanation": "The Turing Test checks whether a human evaluator can distinguish a machine's conversational responses from a human's — a behavioral benchmark for 'intelligence', not raw computational speed."
+    },
+    {
+      "id": "u1-mcq-002",
+      "unit": "I", "topic": "Machine Learning", "type": "mcq", "difficulty": "easy", "bloom": "understand", "marks": 1, "co": "CO1",
+      "question": "A model that performs very well on training data but poorly on unseen test data is said to be:",
+      "options": ["Underfitting", "Overfitting", "Regularized", "Converged"],
+      "correctAnswer": 1,
+      "explanation": "Overfitting occurs when a model memorizes training data patterns/noise instead of learning patterns that generalize to new data."
+    },
+    {
+      "id": "u1-mcq-003",
+      "unit": "I", "topic": "Deep Learning", "type": "mcq", "difficulty": "medium", "bloom": "understand", "marks": 1, "co": "CO1",
+      "question": "In a deep neural network, what is the primary role of a non-linear activation function such as ReLU?",
+      "options": ["To normalize the input data", "To introduce non-linearity so the network can learn complex patterns", "To reduce the number of layers needed", "To store gradients between epochs"],
+      "correctAnswer": 1,
+      "explanation": "Without a non-linear activation function, stacking layers would mathematically collapse into a single linear transformation, no matter how many layers are added."
+    },
+    {
+      "id": "u1-truefalse-001",
+      "unit": "I", "topic": "Discriminative vs Generative Models", "type": "truefalse", "difficulty": "easy", "bloom": "understand", "marks": 1, "co": "CO1",
+      "question": "A discriminative model directly models P(data), the full joint distribution of the input, while a generative model models only the decision boundary P(label|data).",
+      "correctAnswer": false,
+      "explanation": "It's the reverse: discriminative models learn P(label|data) — the decision boundary — while generative models learn P(data), the full distribution, which is why they can produce new samples."
+    },
+    {
+      "id": "u1-truefalse-002",
+      "unit": "I", "topic": "Transformers & Self-Attention", "type": "truefalse", "difficulty": "medium", "bloom": "understand", "marks": 1, "co": "CO1",
+      "question": "In the Transformer architecture, positional encoding is added to token embeddings because self-attention itself has no inherent sense of word order.",
+      "correctAnswer": true,
+      "explanation": "Self-attention treats the input as an unordered set of tokens; positional encodings inject sequence-order information that attention alone does not capture."
+    },
+    {
+      "id": "u1-multiselect-001",
+      "unit": "I", "topic": "BERT, GPT, LLaMA & Gemini", "type": "multiselect", "difficulty": "medium", "bloom": "analyze", "marks": 2, "co": "CO1",
+      "question": "Select ALL models below that use a decoder-only (autoregressive, left-to-right) Transformer architecture.",
+      "options": ["GPT", "BERT", "LLaMA", "ELMo", "Gemini"],
+      "correctAnswers": [0, 2, 4],
+      "explanation": "GPT, LLaMA, and Gemini are decoder-only autoregressive models that generate text left-to-right. BERT is encoder-only/bidirectional, and ELMo predates the Transformer, using bidirectional LSTMs instead."
+    },
+    {
+      "id": "u1-multiselect-002",
+      "unit": "I", "topic": "Mathematical Foundations", "type": "multiselect", "difficulty": "hard", "bloom": "analyze", "marks": 2, "co": "CO1",
+      "question": "Select ALL statements that correctly describe Gradient Descent.",
+      "options": ["It updates weights in the direction that increases the loss", "It updates weights in the direction that decreases the loss (negative gradient)", "The learning rate controls the size of each update step", "It requires the loss function to be differentiable", "It guarantees finding the global minimum for any loss surface"],
+      "correctAnswers": [1, 2, 3],
+      "explanation": "Gradient descent moves opposite to the gradient (toward lower loss); the learning rate scales the step size; and it requires a differentiable loss. It does NOT guarantee a global minimum on non-convex surfaces like deep neural network loss landscapes."
+    },
+    {
+      "id": "u1-fillblank-001",
+      "unit": "I", "topic": "Tokenization", "type": "fillblank", "difficulty": "medium", "bloom": "remember", "marks": 1, "co": "CO1",
+      "question": "GPT-family models commonly use a sub-word tokenization algorithm called Byte-Pair ______.",
+      "acceptableAnswers": ["encoding"],
+      "caseSensitive": false,
+      "explanation": "Byte-Pair Encoding (BPE) iteratively merges the most frequent adjacent character/byte pairs to build a sub-word vocabulary."
+    },
+    {
+      "id": "u1-fillblank-002",
+      "unit": "I", "topic": "Embeddings", "type": "fillblank", "difficulty": "medium", "bloom": "understand", "marks": 1, "co": "CO1",
+      "question": "Word embeddings that place semantically similar words close together in vector space are called ______ vectors (as opposed to sparse one-hot vectors).",
+      "acceptableAnswers": ["dense", "dense embedding"],
+      "caseSensitive": false,
+      "explanation": "Dense embeddings encode meaning in a lower-dimensional continuous space, unlike sparse one-hot vectors, which carry no semantic information."
+    },
+    {
+      "id": "u1-fillblank-003",
+      "unit": "I", "topic": "Mathematical Foundations", "type": "fillblank", "difficulty": "easy", "bloom": "remember", "marks": 1, "co": "CO1",
+      "question": "The hyperparameter that controls how large a step Gradient Descent takes toward the minimum at each iteration is called the ______ ______.",
+      "acceptableAnswers": ["learning rate"],
+      "caseSensitive": false,
+      "explanation": "Too high a learning rate can overshoot the minimum; too low makes training very slow."
+    },
+    {
+      "id": "u1-descriptive-001",
+      "unit": "I", "topic": "Evolution of Language Models", "type": "descriptive", "difficulty": "hard", "bloom": "analyze", "marks": 3, "co": "CO1",
+      "question": "Trace the evolution of language modeling architectures from RNNs/LSTMs to the Transformer. Why did Transformers largely replace RNNs for large-scale language modeling?",
+      "keywords": ["sequential", "parallel", "long-range", "attention", "RNN", "LSTM", "Transformer", "vanishing gradient"],
+      "minKeywordsForFullMarks": 5,
+      "modelAnswer": "RNNs and LSTMs process tokens sequentially, one at a time, which makes training slow and hard to parallelize on GPUs, and they struggle to retain information over long-range dependencies due to vanishing gradients. Transformers (2017) replaced sequential recurrence with self-attention, letting every token attend to every other token in parallel — speeding up training and better capturing long-range dependencies, which is why Transformers became the dominant architecture.",
+      "explanation": "Look for: sequential vs. parallel processing, the long-range dependency/vanishing gradient limitation of RNNs, and self-attention as the Transformer's key innovation."
+    },
+    {
+      "id": "u1-descriptive-002",
+      "unit": "I", "topic": "Generative AI", "type": "descriptive", "difficulty": "medium", "bloom": "understand", "marks": 3, "co": "CO1",
+      "question": "Explain what a Foundation Model is and why 'pre-training once, then adapting for many tasks' is considered more efficient than training a separate model from scratch for every task.",
+      "keywords": ["foundation model", "pre-train", "broad data", "fine-tune", "adapt", "transfer learning", "many tasks"],
+      "minKeywordsForFullMarks": 4,
+      "modelAnswer": "A Foundation Model is a large model pre-trained once on broad, diverse data, then adapted (via fine-tuning or prompting) to many downstream tasks. This is more efficient than training from scratch per task because the expensive pre-training cost is paid only once, and the model transfers general language/world knowledge to new tasks with comparatively little additional data or compute.",
+      "explanation": "Full marks require identifying the pre-train-once-adapt-many pattern and citing the efficiency/transfer-learning benefit."
+    },
+    {
+      "id": "u1-scenario-001",
+      "unit": "I", "topic": "Applications of GenAI", "type": "scenario", "difficulty": "hard", "bloom": "evaluate", "marks": 3, "co": "CO1",
+      "question": "A bank wants to deploy an LLM-based chatbot to answer customer questions about loan eligibility and give personalized approval decisions. Evaluate whether this is an appropriate use of a generative model, and identify at least one major risk the bank must address before launch.",
+      "keywords": ["hallucination", "bias", "risk", "review", "regulation", "generative", "fairness", "accountability"],
+      "minKeywordsForFullMarks": 4,
+      "modelAnswer": "This is a risky application: generative models can hallucinate plausible-sounding but incorrect eligibility rules, and may reflect biases present in training data, leading to unfair or non-compliant lending decisions. Financial decisions typically require explainability and regulatory compliance, so the bank should restrict the LLM to answering general FAQs and route actual approval decisions through an auditable, rule-based or human-reviewed system rather than the generative model directly.",
+      "explanation": "Look for: recognition of hallucination/bias risk, and a concrete mitigation such as human review, restricting scope, or compliance/audit requirements."
+    },
+    {
+      "id": "u1-scenario-002",
+      "unit": "I", "topic": "Discriminative vs Generative Models", "type": "scenario", "difficulty": "medium", "bloom": "apply", "marks": 3, "co": "CO1",
+      "question": "An email provider wants to build a system that (a) labels incoming mail as 'spam' or 'not spam', and separately (b) auto-drafts suggested replies to emails. Classify each sub-task as discriminative or generative, and justify each classification.",
+      "keywords": ["discriminative", "classify", "label", "generative", "draft", "create", "boundary", "distribution"],
+      "minKeywordsForFullMarks": 5,
+      "modelAnswer": "(a) Spam detection is discriminative — it assigns an input email to one of two predefined categories (spam/not spam), learning a decision boundary P(label|data). (b) Auto-drafting replies is generative — it must produce new text that did not exist before, requiring a model of how plausible replies are generated, i.e. P(data).",
+      "explanation": "Full marks require correctly classifying BOTH sub-tasks and giving the boundary-vs-generation reasoning for each."
+    },
+    {
+      "id": "u1-codeoutput-001",
+      "unit": "I", "topic": "Tokenization", "type": "codeoutput", "difficulty": "medium", "bloom": "apply", "marks": 2, "co": "CO1", "runnable": true,
+      "question": "This is a toy sub-word tokenizer (a simplified stand-in for real BPE). Run it (or edit and re-run it) to see what `tokens` contains when \"unbelievable\" is split using only the known sub-word pieces defined in `known_pieces`. What does the code print?",
+      "codeSnippet": "def simple_subword_tokenize(word):\n    known_pieces = [\"un\", \"believ\", \"able\", \"ness\", \"ing\"]\n    tokens = []\n    i = 0\n    while i < len(word):\n        matched = False\n        for piece in sorted(known_pieces, key=len, reverse=True):\n            if word.startswith(piece, i):\n                tokens.append(piece)\n                i += len(piece)\n                matched = True\n                break\n        if not matched:\n            tokens.append(word[i])\n            i += 1\n    return tokens\n\ntokens = simple_subword_tokenize(\"unbelievable\")\nprint(tokens)",
+      "acceptableAnswers": ["['un', 'believ', 'able']", "un believ able", "['un','believ','able']", "un, believ, able"],
+      "explanation": "A sub-word tokenizer splits an unseen long word into known sub-word pieces such as prefixes/suffixes ('un', 'believ', 'able') rather than failing or treating it as a single unknown token — you just watched it happen by running the code."
+    },
+    {
+      "id": "u1-codeoutput-002",
+      "unit": "I", "topic": "Mathematical Foundations", "type": "codeoutput", "difficulty": "medium", "bloom": "apply", "marks": 2, "co": "CO1", "runnable": true,
+      "question": "Run this code (or edit the `logits` list and re-run it) to see what `probs` sums to after applying softmax to any vector of logits. What does the code print?",
+      "codeSnippet": "import math\n\ndef softmax(logits):\n    exps = [math.exp(x) for x in logits]\n    total = sum(exps)\n    return [e / total for e in exps]\n\nlogits = [2.0, 1.0, 0.1]\nprobs = softmax(logits)\nprint(round(sum(probs), 6))",
+      "acceptableAnswers": ["1", "1.0", "one"],
+      "explanation": "Softmax converts logits into a valid probability distribution, so its outputs always sum to 1, regardless of the input values — as the code you just ran confirms."
+    },
+    {
+      "id": "u1-debugging-001",
+      "unit": "I", "topic": "Deep Learning", "type": "debugging", "difficulty": "hard", "bloom": "analyze", "marks": 3, "co": "CO1",
+      "question": "A student built a 5-layer neural network but used a linear (identity) activation function at every layer, and found their network performed no better than a single-layer linear regression. Identify the bug and explain the fix.",
+      "keywords": ["linear", "non-linear", "activation", "ReLU", "collapse", "composition"],
+      "minKeywordsForFullMarks": 3,
+      "modelAnswer": "The bug is using a linear activation function at every layer. Stacking linear transformations is mathematically equivalent to a single linear transformation, no matter how many layers are added, so the network can only learn linear relationships. The fix is to use a non-linear activation function (e.g. ReLU, GELU, tanh) between layers, allowing the network to approximate complex, non-linear functions.",
+      "explanation": "The core bug is conceptual: without non-linear activations, depth adds no representational power."
+    },
+    {
+      "id": "u1-debugging-002",
+      "unit": "I", "topic": "Embeddings", "type": "debugging", "difficulty": "hard", "bloom": "analyze", "marks": 3, "co": "CO1", "runnable": true,
+      "question": "Run this code to see the bug for yourself: it always prints a similarity of exactly 0 for \"dog\" and \"puppy\", even though they're closely related words. Identify the likely bug and explain the fix in your answer below. (Optional: try editing `one_hot_encode` into a small dense-embedding stand-in and re-run to see the similarity change.)",
+      "codeSnippet": "import math\n\ndef one_hot_encode(word):\n    vocab = [\"cat\", \"dog\", \"puppy\", \"kitten\"]\n    vec = [0] * len(vocab)\n    if word in vocab:\n        vec[vocab.index(word)] = 1\n    return vec\n\ndef cosine_similarity(v1, v2):\n    dot = sum(a * b for a, b in zip(v1, v2))\n    mag1 = math.sqrt(sum(a * a for a in v1))\n    mag2 = math.sqrt(sum(b * b for b in v2))\n    if mag1 == 0 or mag2 == 0:\n        return 0\n    return dot / (mag1 * mag2)\n\nvec1 = one_hot_encode(\"dog\")\nvec2 = one_hot_encode(\"puppy\")\nsimilarity = cosine_similarity(vec1, vec2)\nprint(similarity)",
+      "keywords": ["one-hot", "embedding", "dense vector", "semantic meaning", "sparse", "orthogonal"],
+      "minKeywordsForFullMarks": 3,
+      "modelAnswer": "The bug is using one-hot encoding instead of a dense embedding. One-hot vectors are orthogonal to each other by construction, so cosine similarity between any two distinct one-hot vectors is always exactly 0, regardless of meaning. The fix is to use pre-trained dense word embeddings, which place semantically similar words close together in vector space.",
+      "explanation": "The core bug is conceptual: one-hot vectors cannot represent similarity at all, since every pair of distinct one-hot vectors is orthogonal."
+    },
+    {
+      "id": "u1-promptengineering-001",
+      "unit": "I", "topic": "Foundation Models", "type": "promptengineering", "difficulty": "medium", "bloom": "create", "marks": 3, "co": "CO1",
+      "question": "Write a single prompt you could give to an LLM to have it explain what a 'Foundation Model' is to a new engineering hire who knows general software engineering but has never studied machine learning. Your prompt should specify the audience, the desired analogy or example, and the desired length.",
+      "keywords": ["audience", "analogy", "example", "length", "beginner", "explain", "engineer"],
+      "minKeywordsForFullMarks": 4,
+      "modelAnswer": "Example strong prompt: 'Explain what a Foundation Model is to a software engineer with no machine learning background. Use an analogy to a general-purpose software library that gets specialized for different applications. Keep the explanation under 150 words and avoid deep mathematical detail.'",
+      "explanation": "Full marks requires the prompt to specify: (1) the target audience's background, (2) a request for an analogy/example, and (3) a length or format constraint."
+    },
+    {
+      "id": "u1-promptengineering-002",
+      "unit": "I", "topic": "Applications of GenAI", "type": "promptengineering", "difficulty": "medium", "bloom": "create", "marks": 3, "co": "CO1",
+      "question": "Write a single prompt you could give to an LLM to make it return a structured, easily parseable JSON summary of a customer support email, including fields for sentiment, urgency, and a one-line summary.",
+      "keywords": ["JSON", "structured", "format", "fields", "sentiment", "urgency", "summary", "schema"],
+      "minKeywordsForFullMarks": 4,
+      "modelAnswer": "Example strong prompt: 'Read the following customer support email and return ONLY a JSON object with exactly these fields: \"sentiment\" (positive/neutral/negative), \"urgency\" (low/medium/high), and \"summary\" (a single sentence). Do not include any text outside the JSON object.'",
+      "explanation": "Full marks requires specifying the exact output format (JSON), the required fields/schema, and an instruction constraining the model to output ONLY that structure."
+    }
+  ]
+}
