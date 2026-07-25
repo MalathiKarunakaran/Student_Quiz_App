@@ -4,42 +4,41 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CSA65 Quiz Management System</title>
+<script>(function(){try{var t=localStorage.getItem('csa65theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <div class="wrap">
   <header class="app-header">
+    <button class="theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="Toggle dark/light mode">🌙 Dark Mode</button>
     <div class="eyebrow">CSA65 · Generative AI and Large Language Models</div>
-    <h1>Quiz Management System</h1>
+    <div class="tokenizer-hero" aria-hidden="true">
+      <span class="tk tk-a">Quiz<sub>0</sub></span><span class="tk tk-b">Manage<sub>1</sub></span><span class="tk tk-c">ment<sub>2</sub></span><span class="tk tk-d">System<sub>3</sub></span>
+    </div>
+    <h1 class="sr-only" style="position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0);">Quiz Management System</h1>
     <p>A no-backend, GitHub Pages–hosted quiz platform. Pick your role below to get started.</p>
   </header>
 
   <div class="nav-grid">
     <a class="nav-card" href="student.html">
+      <span class="role-tag">role: student</span>
       <div class="icon">🧑‍🎓</div>
       <h3>I'm a Student</h3>
       <p>Enter your name and roll number to start the assigned quiz. Your progress is saved automatically if you need to pause.</p>
     </a>
     <a class="nav-card" href="teacher.html">
+      <span class="role-tag">role: instructor</span>
       <div class="icon">🧑‍🏫</div>
       <h3>I'm the Instructor</h3>
       <p>Filter the question bank by unit/topic/difficulty/Bloom level/type, configure a quiz, and generate a shareable student link.</p>
     </a>
   </div>
 
-  <div class="card">
-    <h2>How This Works</h2>
-    <p style="font-size:13.5px; color:var(--muted); margin:0 0 10px;">
-      This entire application runs in your browser — there is no server and no database. Question banks live as JSON files in this repository (<code>data/*.json</code>), and quiz configuration is either a committed config file or encoded directly into the shareable link the instructor sends out.
-    </p>
-    <p style="font-size:13.5px; color:var(--muted); margin:0;">
-      See <a href="docs/README.md">docs/README.md</a> in this repository for full architecture, deployment instructions, JSON schemas, and how to add new units/questions in future semesters.
-    </p>
-  </div>
-
   <div class="footnote">
-    CSA65 Quiz Management System — static, client-side, GitHub Pages–ready. No API keys are used or required by this application.
+    CSA65 Quiz Management System
   </div>
 </div>
+<script src="js/theme.js"></script>
+<script>Theme.init();</script>
 </body>
 </html>

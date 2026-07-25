@@ -47,7 +47,8 @@ const Exporter = (() => {
     const summary = [
       [], ["Student", meta.studentName], ["Roll No", meta.rollNo], ["Quiz", meta.quizTitle],
       ["Submitted At", meta.submittedAt], ["Total Marks", `${scoreResult.totalEarned} / ${scoreResult.totalMax}`],
-      ["Percentage", `${scoreResult.percentage}%`], ["Tab Switches During Quiz", meta.tabSwitchCount || 0]
+      ["Percentage", `${scoreResult.percentage}%`], ["Time Taken (seconds)", meta.timeTakenSeconds ?? "N/A"],
+      ["Integrity Violations", meta.violationCount || 0], ["Auto-Submitted", meta.autoSubmitted ? "Yes" : "No"]
     ];
     const csvLines = [header.map(csvEscape).join(",")]
       .concat(rows.map(r => r.map(csvEscape).join(",")))

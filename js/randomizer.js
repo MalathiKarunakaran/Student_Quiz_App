@@ -91,10 +91,48 @@ const Randomizer = (() => {
   /**
    * Selects `count` questions from `pool` using the given rand function.
    * If count >= pool.length, returns the whole pool shuffled.
+   *
+   * Stratifies by question `type` so a generated quiz keeps roughly the same
+   * type mix as the source bank (e.g. a bank that's 20% code/debugging
+   * questions produces quizzes that are ~20% code/debugging), rather than a
+   * flat shuffle — which, especially when `count` is a large fraction of
+   * `pool.length`, can easily over- or under-represent a type for a given
+   * student's seed purely by chance.
    */
   function selectQuestions(pool, count, randFn) {
-    const shuffled = shuffle(pool, randFn);
-    return shuffled.slice(0, Math.min(count, shuffled.length));
+    if (count >= pool.length) return shuffle(pool, randFn);
+
+    const groups = new Map();
+    pool.forEach(q => {
+      if (!groups.has(q.type)) groups.set(q.type, []);
+      groups.get(q.type).push(q);
+    });
+    const keys = Array.from(groups.keys());
+
+    // Largest-remainder method: proportional integer quota per type summing to `count`.
+    const raw = keys.map(k => (groups.get(k).length / pool.length) * count);
+    const quota = raw.map(Math.floor);
+    let leftToAssign = count - quota.reduce((a, b) => a + b, 0);
+    const byRemainder = raw
+      .map((r, i) => ({ i, frac: r - quota[i] }))
+      .sort((a, b) => b.frac - a.frac);
+    for (let r = 0; r < leftToAssign; r++) quota[byRemainder[r].i] += 1;
+
+    let selected = [];
+    keys.forEach((k, i) => {
+      selected = selected.concat(shuffle(groups.get(k), randFn).slice(0, quota[i]));
+    });
+
+    // Guard: if any type had fewer questions available than its quota (only
+    // possible with a very small/uneven bank), top up from the leftover pool
+    // so the quiz still reaches `count` total questions.
+    if (selected.length < count) {
+      const selectedIds = new Set(selected.map(q => q.id));
+      const leftover = shuffle(pool.filter(q => !selectedIds.has(q.id)), randFn);
+      selected = selected.concat(leftover.slice(0, count - selected.length));
+    }
+
+    return shuffle(selected, randFn);
   }
 
   /**

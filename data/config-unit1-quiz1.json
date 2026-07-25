@@ -18,5 +18,14 @@
   "showExplanationsAfterSubmit": true,
   "passingPercentage": 50,
   "allowReviewBeforeSubmit": true,
-  "autoSubmitOnTimeout": true
+  "autoSubmitOnTimeout": true,
+  "negativeMarking": {
+    "enabled": false,
+    "penaltyFraction": 0.25
+  },
+  "violationPolicy": {
+    "mode": "warn",
+    "maxViolations": 3
+  },
+  "generatePdfReport": true
 }

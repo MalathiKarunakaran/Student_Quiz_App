@@ -116,7 +116,16 @@ function buildConfigFromUI() {
     showExplanationsAfterSubmit: document.getElementById('showExplanations').checked,
     passingPercentage: parseInt(document.getElementById('passingPct').value, 10) || 50,
     allowReviewBeforeSubmit: document.getElementById('allowReview').checked,
-    autoSubmitOnTimeout: true
+    autoSubmitOnTimeout: true,
+    negativeMarking: {
+      enabled: document.getElementById('negMarkingEnabled').checked,
+      penaltyFraction: parseFloat(document.getElementById('negMarkingFraction').value) || 0.25
+    },
+    violationPolicy: {
+      mode: document.getElementById('violationMode').value,
+      maxViolations: parseInt(document.getElementById('maxViolations').value, 10) || 3
+    },
+    generatePdfReport: document.getElementById('pdfReportEnabled').checked
   };
 }
 

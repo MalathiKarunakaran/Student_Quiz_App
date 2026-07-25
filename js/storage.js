@@ -19,8 +19,10 @@ const QuizStorage = (() => {
   function saveProgress(quizId, rollNo, state) {
     try {
       localStorage.setItem(key(quizId, rollNo), JSON.stringify(state));
+      return true;
     } catch (e) {
       console.warn("QuizStorage: could not save progress (localStorage unavailable/full)", e);
+      return false;
     }
   }
 

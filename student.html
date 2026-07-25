@@ -4,11 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CSA65 Quiz — Student</title>
+<script>(function(){try{var t=localStorage.getItem('csa65theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <div class="wrap">
   <header class="app-header">
+    <button class="theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="Toggle dark/light mode">🌙 Dark Mode</button>
     <div class="eyebrow">CSA65 · Generative AI and Large Language Models</div>
     <h1 id="quizTitleHeader">Quiz</h1>
     <p id="quizSubHeader">Enter your details below to begin.</p>
@@ -27,20 +29,22 @@
     </div>
     <div id="entryError"></div>
     <div class="btn-row">
-      <button class="btn-primary" id="startBtn" onclick="startQuiz()">Start Quiz</button>
+      <button class="btn-primary" id="startBtn" onclick="startQuiz()">Start Quiz (Full-Screen)</button>
     </div>
-    <div class="footnote">Your roll number determines your specific question set if the instructor configured "seeded" randomization — this ensures fairness while still giving each student a somewhat different quiz.</div>
+    <div class="footnote">Your roll number determines your specific question set if the instructor configured "seeded" randomization — this ensures fairness while still giving each student a somewhat different quiz. Starting the quiz will switch your browser to full-screen mode, which is required for the duration of the quiz.</div>
   </div>
 
   <!-- SCREEN 2: Quiz in progress -->
   <div class="card" id="quizScreen" style="display:none;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
       <span class="timer-badge" id="timerBadge">--:--</span>
-      <span style="font-size:12.5px; color:var(--muted);" id="studentBadge"></span>
+      <span style="font-size:12.5px; color:var(--graphite);" id="studentBadge"></span>
     </div>
     <div class="progress-bar-outer"><div class="progress-bar-inner" id="progressBarInner" style="width:0%;"></div></div>
     <div class="progress-label"><span id="progressText">0 of 0 answered</span><span id="progressPercent">0%</span></div>
-    <div id="tabSwitchWarning" style="display:none;"></div>
+    <div id="violationBanner" style="display:none;"></div>
+    <div class="offline-banner" id="offlineBanner" style="display:none;" role="status">You're offline — no problem, your answers are saved on this device and will keep saving as you go.</div>
+    <div class="unanswered-banner" id="unansweredBanner" style="display:none;" role="status"></div>
 
     <div id="questionContainer"></div>
 
@@ -60,11 +64,13 @@
       <div class="big-score" id="resultScore">0 / 0</div>
       <div class="sub" id="resultPercent">0%</div>
       <div class="sub" id="resultPassFail" style="margin-top:8px; font-weight:700;"></div>
+      <div class="grade-bar-row" id="gradeBandRow"></div>
     </div>
     <div id="resultReviewNote"></div>
     <div id="resultBreakdown"></div>
     <div class="btn-row">
-      <button class="btn-primary" onclick="downloadCSV()">Download Result (CSV)</button>
+      <button class="btn-primary" id="downloadPdfBtn" onclick="downloadPDF()" style="display:none;">Download PDF Report</button>
+      <button class="btn-secondary" onclick="downloadCSV()">Download Result (CSV)</button>
       <button class="btn-secondary" onclick="downloadJSON()">Download Result (JSON)</button>
     </div>
   </div>
@@ -82,6 +88,9 @@
 <script src="js/code-runner.js"></script>
 <script src="js/question-renderer.js"></script>
 <script src="js/export.js"></script>
+<script src="js/pdf-report.js"></script>
+<script src="js/integrity.js"></script>
+<script src="js/theme.js"></script>
 <script src="js/quiz-engine.js"></script>
 <script>
 let lastScoreResult = null;
@@ -100,6 +109,20 @@ async function startQuiz() {
 
   const startBtn = document.getElementById('startBtn');
   startBtn.disabled = true;
+  startBtn.textContent = 'Requesting full-screen…';
+
+  // Full-screen is mandatory and must be requested here, directly inside this
+  // click handler, before any other await — browsers only grant fullscreen
+  // from a live user-gesture call stack.
+  try {
+    await IntegrityGuard.requestFullscreen(document.documentElement);
+  } catch (e) {
+    errBox.innerHTML = `<div class="error-box">${e.message}</div>`;
+    startBtn.disabled = false;
+    startBtn.textContent = 'Start Quiz (Full-Screen)';
+    return;
+  }
+
   startBtn.textContent = 'Loading...';
 
   try {
@@ -114,55 +137,122 @@ async function startQuiz() {
 
     QuizEngine.setTickHandler(onTimerTick);
     QuizEngine.setAutoSubmitHandler((result) => {
-      document.removeEventListener('visibilitychange', onVisibilityChange);
+      IntegrityGuard.disable();
+      IntegrityGuard.exitFullscreen();
       lastScoreResult = result.scoreResult;
       lastMeta = result.meta;
       showResults(result.scoreResult, result.meta, true);
     });
     state.timer.start();
     enableIntegrityGuards();
+    enableConnectivityBanner();
 
     renderCurrentQuestion();
   } catch (e) {
+    IntegrityGuard.exitFullscreen();
     errBox.innerHTML = `<div class="error-box">Could not start quiz: ${e.message}</div>`;
     startBtn.disabled = false;
-    startBtn.textContent = 'Start Quiz';
+    startBtn.textContent = 'Start Quiz (Full-Screen)';
   }
 }
 
 /**
- * Formative-quiz integrity guards. Client-side only, so not a real proctoring
- * mechanism (see README Security & Limitations) — the goal is visibility for
- * the instructor and a mild deterrent, not enforcement. Paste is blocked on
- * every answer field; leaving the tab is logged and shown to the student,
- * never auto-submitted, so a stray notification can't cost someone their attempt.
+ * Exam-lockdown guards for the duration of the quiz (see js/integrity.js for
+ * full rationale/limitations). Every detected violation is routed through
+ * QuizEngine.recordViolation(), which applies the instructor's configured
+ * policy (warn / auto-submit after N / auto-submit immediately).
  */
 function enableIntegrityGuards() {
-  document.getElementById('questionContainer').addEventListener('paste', (e) => {
-    const tag = e.target.tagName;
-    if (tag === 'TEXTAREA' || tag === 'INPUT') {
-      e.preventDefault();
-      flashPasteBlocked(e.target);
+  IntegrityGuard.enable({
+    onViolation: handleViolation,
+    onPasteBlocked: (target) => {
+      target.classList.add('paste-blocked');
+      setTimeout(() => target.classList.remove('paste-blocked'), 600);
     }
   });
-
-  document.addEventListener('visibilitychange', onVisibilityChange);
 }
 
-function flashPasteBlocked(target) {
-  target.classList.add('paste-blocked');
-  setTimeout(() => target.classList.remove('paste-blocked'), 600);
+function handleViolation(type) {
+  const result = QuizEngine.recordViolation(type);
+  if (!result) return;
+  renderViolationBanner(result);
+
+  if (result.triggeredSubmit && result.submitResult) {
+    IntegrityGuard.disable();
+    IntegrityGuard.exitFullscreen();
+    lastScoreResult = result.submitResult.scoreResult;
+    lastMeta = result.submitResult.meta;
+    showResults(result.submitResult.scoreResult, result.submitResult.meta, true);
+  }
 }
 
-function onVisibilityChange() {
-  if (document.hidden) {
-    QuizEngine.recordTabSwitch();
+const VIOLATION_LABEL = { tabswitch: 'switched away from this tab', windowblur: 'lost window focus', fullscreenexit: 'exited full-screen' };
+
+function renderViolationBanner(result) {
+  const box = document.getElementById('violationBanner');
+  const policy = QuizEngine.getState().config.violationPolicy || { mode: 'warn' };
+  box.style.display = 'block';
+
+  let msg = `You ${VIOLATION_LABEL[result.type] || 'triggered a violation'} (${result.count} recorded so far). This is noted for your instructor.`;
+  if (policy.mode === 'autoSubmitAfterN') {
+    msg += ` Your quiz will auto-submit after ${policy.maxViolations} violations.`;
+  }
+
+  let html = `<div class="error-box">${msg}</div>`;
+  if (result.type === 'fullscreenexit' && !IntegrityGuard.isFullscreen()) {
+    html += `<div class="btn-row" style="margin-top:0;"><button class="btn-secondary" onclick="resumeFullscreen()">Resume Full-Screen</button></div>`;
+  }
+  box.innerHTML = html;
+}
+
+function resumeFullscreen() {
+  IntegrityGuard.requestFullscreen(document.documentElement).catch(() => {});
+}
+
+/** Non-alarming connectivity banner. Saving itself never touches the network
+ *  (localStorage only), so this is purely reassurance, not a functional guard. */
+function enableConnectivityBanner() {
+  const banner = document.getElementById('offlineBanner');
+  const update = () => { banner.style.display = navigator.onLine ? 'none' : 'block'; };
+  window.addEventListener('online', update);
+  window.addEventListener('offline', update);
+  update();
+}
+
+/**
+ * Save-status indicator state machine. The localStorage write itself always
+ * happens synchronously and immediately on every change — that reliability
+ * guarantee is unchanged. What's debounced here is purely the visual "Saved ✓"
+ * settle, so rapid typing shows a steady "Saving…" instead of strobing on
+ * every keystroke. On a write failure, retries the same save (idempotent —
+ * it always persists the full current answer set) a few times before giving up.
+ */
+let saveSettleTimer = null;
+let saveRetryTimer = null;
+let saveRetryCount = 0;
+
+function clearSaveTimers() {
+  clearTimeout(saveSettleTimer);
+  clearTimeout(saveRetryTimer);
+  saveRetryCount = 0;
+}
+
+function handleAnswerChange(qid, ans) {
+  clearSaveTimers();
+  QuestionRenderer.setSaveStatus('saving');
+  attemptSave(qid, ans);
+  updateProgress();
+}
+
+function attemptSave(qid, ans) {
+  const ok = QuizEngine.recordAnswer(qid, ans);
+  if (ok) {
+    saveSettleTimer = setTimeout(() => QuestionRenderer.setSaveStatus('saved'), 350);
   } else {
-    const count = QuizEngine.getState().tabSwitchCount;
-    if (count > 0) {
-      const box = document.getElementById('tabSwitchWarning');
-      box.style.display = 'block';
-      box.innerHTML = `<div class="error-box">You left the quiz tab (${count} time${count !== 1 ? 's' : ''} so far). This is noted for your instructor.</div>`;
+    QuestionRenderer.setSaveStatus('error');
+    if (saveRetryCount < 3) {
+      saveRetryCount++;
+      saveRetryTimer = setTimeout(() => attemptSave(qid, ans), 1000);
     }
   }
 }
@@ -174,15 +264,13 @@ function onTimerTick(secondsRemaining) {
 }
 
 function renderCurrentQuestion() {
+  clearSaveTimers();
   const state = QuizEngine.getState();
   const question = QuizEngine.getCurrentQuestion();
   const container = document.getElementById('questionContainer');
   container.innerHTML = '';
   const existingAnswer = state.answers[question.id];
-  const node = QuestionRenderer.render(question, state.currentIndex, state.quiz.length, existingAnswer, (qid, ans) => {
-    QuizEngine.recordAnswer(qid, ans);
-    updateProgress();
-  });
+  const node = QuestionRenderer.render(question, state.currentIndex, state.quiz.length, existingAnswer, handleAnswerChange);
   container.appendChild(node);
 
   document.getElementById('prevBtn').disabled = state.currentIndex === 0;
@@ -197,8 +285,33 @@ function updateProgress() {
   document.getElementById('progressPercent').textContent = p.percent + '%';
 }
 
-function goNext() { if (QuizEngine.nextQuestion()) renderCurrentQuestion(); }
-function goPrev() { if (QuizEngine.prevQuestion()) renderCurrentQuestion(); }
+/**
+ * Soft, non-blocking reminder shown after navigating away from an unanswered
+ * question — deliberately never blocks movement (instructor's choice: some
+ * students skip hard questions on purpose and come back before Submit).
+ */
+let unansweredBannerTimer = null;
+function noteIfLeavingUnanswered(fn) {
+  const state = QuizEngine.getState();
+  const leftQuestion = QuizEngine.getCurrentQuestion();
+  const leftIndex = state.currentIndex;
+  const wasUnanswered = state.answers[leftQuestion.id] === undefined;
+  if (fn()) {
+    renderCurrentQuestion();
+    if (wasUnanswered) showUnansweredNotice(leftIndex + 1);
+  }
+}
+
+function showUnansweredNotice(questionNumber) {
+  const box = document.getElementById('unansweredBanner');
+  clearTimeout(unansweredBannerTimer);
+  box.textContent = `Q${questionNumber} was left unanswered — you can come back to it before submitting.`;
+  box.style.display = 'block';
+  unansweredBannerTimer = setTimeout(() => { box.style.display = 'none'; }, 4000);
+}
+
+function goNext() { noteIfLeavingUnanswered(QuizEngine.nextQuestion); }
+function goPrev() { noteIfLeavingUnanswered(QuizEngine.prevQuestion); }
 
 function confirmSubmit() {
   const p = QuizEngine.getProgress();
@@ -209,9 +322,11 @@ function confirmSubmit() {
 }
 
 function finalizeSubmit(isAuto) {
+  clearSaveTimers();
   const result = QuizEngine.submitQuiz(isAuto);
   if (!result) return;
-  document.removeEventListener('visibilitychange', onVisibilityChange);
+  IntegrityGuard.disable();
+  IntegrityGuard.exitFullscreen();
   lastScoreResult = result.scoreResult;
   lastMeta = result.meta;
   showResults(result.scoreResult, result.meta, isAuto);
@@ -230,16 +345,19 @@ function showResults(scoreResult, meta, wasAutoSubmitted) {
   const passed = scoreResult.percentage >= (config.passingPercentage || 50);
   const passEl = document.getElementById('resultPassFail');
   passEl.textContent = passed ? '✓ PASS' : '✗ Below Passing Threshold';
-  passEl.style.color = passed ? '#9FD8CB' : '#FFB4A0';
+  passEl.style.color = passed ? '#8FE3B8' : '#F5A98A';
+  renderGradeBand(scoreResult.percentage, config.gradeScale, passed);
 
   const notes = [];
   if (scoreResult.anyNeedsReview) {
-    notes.push('<div class="error-box" style="background:#FDEBD0; color:#8A5A00;">Some of your answers (descriptive/scenario/prompt-engineering) received a suggested score only. Your instructor will review these before finalizing your grade.</div>');
+    notes.push('<div class="error-box" style="background:color-mix(in srgb, var(--chip-amber) 14%, var(--surface)); color:var(--chip-amber);">Some of your answers (descriptive/scenario/prompt-engineering) received a suggested score only. Your instructor will review these before finalizing your grade.</div>');
   }
-  if (meta.tabSwitchCount > 0) {
-    notes.push(`<div class="error-box">You left the quiz tab ${meta.tabSwitchCount} time${meta.tabSwitchCount !== 1 ? 's' : ''} during this attempt. This is recorded in your result for your instructor.</div>`);
+  if (meta.violationCount > 0) {
+    notes.push(`<div class="error-box">${meta.violationCount} integrity violation${meta.violationCount !== 1 ? 's' : ''} (tab switches, window focus loss, or full-screen exits) were recorded during this attempt. This is included in your result for your instructor.</div>`);
   }
   document.getElementById('resultReviewNote').innerHTML = notes.join('');
+
+  document.getElementById('downloadPdfBtn').style.display = config.generatePdfReport ? 'inline-block' : 'none';
 
   const breakdown = document.getElementById('resultBreakdown');
   breakdown.innerHTML = '';
@@ -262,6 +380,28 @@ function showResults(scoreResult, meta, wasAutoSubmitted) {
   });
 }
 
+/**
+ * Categorical grade strip on the results screen — every band renders the
+ * same except the one actually achieved, which is filled in the pass/fail
+ * color already shown in the verdict line above it. This is a visual
+ * selector, not a claim about a real probability distribution: the band
+ * positions assume the standard 6-band scale PDFReport.computeGrade falls
+ * back to, since a fully custom gradeScale isn't reflected in the strip.
+ */
+const GRADE_BANDS = ['F', 'D', 'C', 'B', 'A', 'A+'];
+function renderGradeBand(percentage, gradeScale, passed) {
+  const achieved = PDFReport.computeGrade(percentage, gradeScale);
+  const row = document.getElementById('gradeBandRow');
+  row.innerHTML = '';
+  GRADE_BANDS.forEach(grade => {
+    const isAchieved = grade === achieved;
+    const bar = document.createElement('div');
+    bar.className = 'grade-bar' + (isAchieved ? ` achieved ${passed ? 'pass' : 'fail'}` : '');
+    bar.innerHTML = `<span class="grade-bar-label">${grade}</span>`;
+    row.appendChild(bar);
+  });
+}
+
 function downloadCSV() {
   if (!lastScoreResult) return;
   Exporter.exportStudentResultCSV(lastScoreResult, lastMeta);
@@ -270,6 +410,24 @@ function downloadJSON() {
   if (!lastScoreResult) return;
   Exporter.exportStudentResultJSON(lastScoreResult, lastMeta);
 }
+
+async function downloadPDF() {
+  if (!lastScoreResult) return;
+  const btn = document.getElementById('downloadPdfBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Generating PDF…';
+  try {
+    const state = QuizEngine.getState();
+    await PDFReport.generate(lastScoreResult, lastMeta, state.quiz, state.answers, state.config);
+  } catch (e) {
+    alert('Could not generate the PDF report: ' + e.message + '\nYou can still use the CSV/JSON download as a fallback.');
+  }
+  btn.disabled = false;
+  btn.textContent = originalText;
+}
+
+Theme.init();
 </script>
 </body>
 </html>

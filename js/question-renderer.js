@@ -22,16 +22,34 @@ const QuestionRenderer = (() => {
     return node;
   }
 
-  function questionHeader(question, index, total) {
+  function questionHeader(question, index, total, existingAnswer) {
+    const saveStatus = el("span", { class: "q-save-status", id: "qSaveStatus", "aria-live": "polite" });
+    // A resumed answer is, by definition, already persisted — show that up front
+    // rather than leaving the badge blank until the student touches the question again.
+    if (existingAnswer !== undefined) setSaveStatusEl(saveStatus, "saved");
     return el("div", { class: "q-header" }, [
       el("span", { class: "q-badge" }, `Q${index + 1} of ${total}`),
       el("span", { class: "q-meta" }, `${question.topic} · ${question.difficulty} · ${question.marks} mark${question.marks !== 1 ? "s" : ""}`),
+      saveStatus,
     ]);
+  }
+
+  const SAVE_STATUS_LABEL = { saving: "Saving…", saved: "Saved ✓", error: "Not saved (retrying…)" };
+
+  function setSaveStatusEl(node, status) {
+    if (!node) return;
+    node.className = "q-save-status" + (status ? ` q-save-status--${status}` : "");
+    node.textContent = SAVE_STATUS_LABEL[status] || "";
+  }
+
+  /** Updates the currently-rendered question's save-status badge, if present. */
+  function setSaveStatus(status) {
+    setSaveStatusEl(document.getElementById("qSaveStatus"), status);
   }
 
   function render(question, index, total, existingAnswer, onAnswerChange) {
     const container = el("div", { class: "question-card", "data-qid": question.id });
-    container.appendChild(questionHeader(question, index, total));
+    container.appendChild(questionHeader(question, index, total, existingAnswer));
     container.appendChild(el("div", { class: "q-text" }, question.question));
 
     if (question.runnable) {
@@ -155,5 +173,5 @@ const QuestionRenderer = (() => {
       "This answer will receive a suggested AI-free keyword-based score; your instructor will review it before finalizing."));
   }
 
-  return { render };
+  return { render, setSaveStatus };
 })();

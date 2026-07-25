@@ -4,11 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Teacher Panel — CSA65 Quiz Management System</title>
+<script>(function(){try{var t=localStorage.getItem('csa65theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <div class="wrap">
   <header class="app-header">
+    <button class="theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="Toggle dark/light mode">🌙 Dark Mode</button>
     <div class="eyebrow">CSA65 · Teacher Panel</div>
     <h1>Configure a Quiz</h1>
     <p>Load a question bank, filter it, and generate a shareable student link — no repo changes needed for a quick quiz.</p>
@@ -24,7 +26,7 @@
       <button class="btn-primary" onclick="initTeacherPanel()">Load Question Bank</button>
     </div>
     <div id="bankLoadError"></div>
-    <div id="bankStats" style="font-size:12.5px; color:var(--muted); margin-top:8px;"></div>
+    <div id="bankStats" style="font-size:12.5px; color:var(--graphite); margin-top:8px;"></div>
   </div>
 
   <div class="card" id="filterSection" style="display:none;">
@@ -58,8 +60,8 @@
       </div>
     </div>
 
-    <div id="bankStatsMatching" style="font-size:12.5px; color:var(--teal); font-weight:600; margin:8px 0 4px;"></div>
-    <div id="coStats" style="font-size:12.5px; color:var(--muted); margin:2px 0 4px;"></div>
+    <div id="bankStatsMatching" style="font-size:12.5px; color:var(--signal); font-weight:600; margin:8px 0 4px;"></div>
+    <div id="coStats" style="font-size:12.5px; color:var(--graphite); margin:2px 0 4px;"></div>
   </div>
 
   <div class="card" id="configSection" style="display:none;">
@@ -104,6 +106,36 @@
       <div class="checkbox-item"><input type="checkbox" id="showExplanations" checked> <label style="margin:0;">Show explanations after submit</label></div>
       <div class="checkbox-item"><input type="checkbox" id="allowReview" checked> <label style="margin:0;">Allow review before final submit</label></div>
     </div>
+
+    <h2 style="margin-top:22px;">3b. Negative Marking</h2>
+    <div class="checkbox-item" style="margin-bottom:10px;">
+      <input type="checkbox" id="negMarkingEnabled" onchange="document.getElementById('negMarkingFraction').disabled=!this.checked;">
+      <label style="margin:0;">Enable negative marking (objective questions only — MCQ, True/False, Fill-in-Blank, Code Output)</label>
+    </div>
+    <div class="field" style="max-width:280px;">
+      <label>Penalty per wrong answer (fraction of that question's marks)</label>
+      <input type="number" id="negMarkingFraction" value="0.25" min="0" max="1" step="0.05" disabled>
+    </div>
+
+    <h2 style="margin-top:22px;">3c. Lockdown &amp; Violation Policy</h2>
+    <div class="field">
+      <label>What happens when a violation is detected (fullscreen exit, tab switch, window blur)?</label>
+      <select id="violationMode" onchange="document.getElementById('maxViolationsField').style.display=(this.value==='autoSubmitAfterN')?'block':'none';">
+        <option value="warn">Warning only — always let the student continue and finish</option>
+        <option value="autoSubmitAfterN">Auto-submit after N violations</option>
+        <option value="immediate">Auto-submit immediately on the first violation</option>
+      </select>
+    </div>
+    <div class="field" id="maxViolationsField" style="display:none; max-width:220px;">
+      <label>N (max violations before auto-submit)</label>
+      <input type="number" id="maxViolations" value="3" min="1">
+    </div>
+
+    <h2 style="margin-top:22px;">3d. Reports</h2>
+    <div class="checkbox-item">
+      <input type="checkbox" id="pdfReportEnabled" checked>
+      <label style="margin:0;">Let students download a professional PDF report after submitting</label>
+    </div>
   </div>
 
   <div class="card" id="generateSection" style="display:none;">
@@ -115,12 +147,23 @@
     <div id="linkOutput" style="display:none; margin-top:14px;"></div>
   </div>
 
+  <div class="card">
+    <h2>How This Works</h2>
+    <p style="font-size:13.5px; color:var(--graphite); margin:0 0 10px;">
+      This entire application runs in your browser — there is no server and no database. Question banks live as JSON files in this repository (<code>data/*.json</code>), and quiz configuration is either a committed config file or encoded directly into the shareable link you send students.
+    </p>
+    <p style="font-size:13.5px; color:var(--graphite); margin:0;">
+      See <a href="docs/README.md">docs/README.md</a> in this repository for full architecture, deployment instructions, JSON schemas, and how to add new units/questions in future semesters.
+    </p>
+  </div>
+
   <div class="footnote">
     <b>Two ways to deliver a quiz:</b> (1) generate a shareable link — the entire config is embedded in the URL, so you can send it out immediately with zero repo changes; or (2) download the config JSON and commit it to <code>data/</code>, then share a link like <code>student.html?configFile=data/your-config.json</code>. See <a href="docs/README.md">docs/README.md</a> for details.
   </div>
 </div>
 
 <script src="js/data-loader.js"></script>
+<script src="js/theme.js"></script>
 <script src="js/teacher-config.js"></script>
 <script>
   // Reveal remaining sections once a bank is loaded successfully.
@@ -132,6 +175,7 @@
       document.getElementById('generateSection').style.display = 'block';
     }
   };
+  Theme.init();
 </script>
 </body>
 </html>

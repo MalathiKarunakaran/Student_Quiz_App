@@ -113,17 +113,44 @@ const Scorer = (() => {
   }
 
   /**
+   * Negative marking: deducts `penaltyFraction` of a question's marks for a
+   * WRONG objective answer (correct === false). Deliberately excluded:
+   *   - multiselect: already uses proportional partial credit (scoreMultiSelect
+   *     above), so stacking a flat penalty on top would double-punish a
+   *     partially-correct selection.
+   *   - open-ended types (correct === null): never definitively "wrong",
+   *     so a client-side keyword-match score should never be penalized.
+   * The deduction can push a single question's contribution negative — that's
+   * intentional (standard negative-marking behavior) — but the QUIZ TOTAL is
+   * floored at 0 in scoreQuiz() below, never a negative overall score.
+   */
+  function applyNegativeMarking(result, question, negativeMarking) {
+    if (!negativeMarking || !negativeMarking.enabled) return result;
+    if (result.correct !== false) return result;
+    if (question.type === "multiselect") return result;
+    const penaltyFraction = negativeMarking.penaltyFraction != null ? negativeMarking.penaltyFraction : 0.25;
+    const penalized = Math.round((result.earned - question.marks * penaltyFraction) * 100) / 100;
+    return Object.assign({}, result, { earned: penalized, negativeMarkingApplied: true });
+  }
+
+  /**
    * Scores an entire quiz attempt.
    * quiz: array of question objects (the actual generated quiz)
    * answers: object keyed by question.id -> student's raw answer
-   * Returns: { totalEarned, totalMax, percentage, perQuestion: [...] }
+   * negativeMarking (optional): { enabled: boolean, penaltyFraction: number }
+   * Returns: { totalEarned, totalMax, percentage, perQuestion: [...], anyNeedsReview }
    */
-  function scoreQuiz(quiz, answers) {
+  function scoreQuiz(quiz, answers, negativeMarking) {
     const perQuestion = quiz.map(q => {
-      const result = scoreQuestion(q, answers[q.id]);
-      return Object.assign({ questionId: q.id, topic: q.topic, type: q.type }, result);
+      let result = scoreQuestion(q, answers[q.id]);
+      result = applyNegativeMarking(result, q, negativeMarking);
+      return Object.assign(
+        { questionId: q.id, topic: q.topic, type: q.type, bloom: q.bloom, marks: q.marks, question: q.question },
+        result
+      );
     });
-    const totalEarned = Math.round(perQuestion.reduce((s, r) => s + r.earned, 0) * 100) / 100;
+    const rawTotal = Math.round(perQuestion.reduce((s, r) => s + r.earned, 0) * 100) / 100;
+    const totalEarned = Math.max(0, rawTotal);
     const totalMax = perQuestion.reduce((s, r) => s + r.max, 0);
     const percentage = totalMax === 0 ? 0 : Math.round((totalEarned / totalMax) * 1000) / 10;
     const anyNeedsReview = perQuestion.some(r => r.needsReview);

@@ -22,14 +22,43 @@ const QuizEngine = (() => {
     student: { name: "", rollNo: "" },
     timer: null,
     submitted: false,
-    tabSwitchCount: 0
+    violations: []   // { type: 'tabswitch'|'windowblur'|'fullscreenexit', at: ISOString }
   };
 
-  /** Called when the quiz tab is hidden (tab switch, minimize, app switch). */
-  function recordTabSwitch() {
-    if (state.submitted) return;
-    state.tabSwitchCount += 1;
-    return state.tabSwitchCount;
+  /**
+   * Called by IntegrityGuard whenever it detects a tab-switch, window-blur, or
+   * fullscreen-exit event. Applies the teacher-configured violation policy:
+   *   'warn'             — just log it, never auto-submit
+   *   'autoSubmitAfterN' — auto-submit once total violations reach maxViolations
+   *   'immediate'        — auto-submit on the very first violation
+   * Returns { count, type, triggeredSubmit, submitResult } so the caller can
+   * update the UI and, if triggeredSubmit, show the results screen.
+   */
+  function recordViolation(type) {
+    if (state.submitted) return null;
+    state.violations.push({ type, at: new Date().toISOString() });
+    const count = state.violations.length;
+
+    const policy = (state.config && state.config.violationPolicy) || { mode: "warn" };
+    let triggeredSubmit = false;
+    if (policy.mode === "immediate") {
+      triggeredSubmit = true;
+    } else if (policy.mode === "autoSubmitAfterN" && count >= (policy.maxViolations || 3)) {
+      triggeredSubmit = true;
+    }
+
+    let submitResult = null;
+    if (triggeredSubmit) {
+      submitResult = submitQuiz(true);
+      if (submitResult) submitResult.meta.autoSubmitReason = `violation-policy (${type})`;
+    }
+    return { count, type, triggeredSubmit, submitResult };
+  }
+
+  function getViolationBreakdown() {
+    const breakdown = { tabswitch: 0, windowblur: 0, fullscreenexit: 0 };
+    state.violations.forEach(v => { breakdown[v.type] = (breakdown[v.type] || 0) + 1; });
+    return breakdown;
   }
 
   function filterQuestions(bank, filters) {
@@ -45,12 +74,12 @@ const QuizEngine = (() => {
 
   async function init(studentName, rollNo) {
     // Always starts a genuinely fresh attempt in memory — any previous attempt's
-    // submitted/answers/tabSwitchCount must not leak in, even though the shipped
+    // submitted/answers/violations must not leak in, even though the shipped
     // UI only ever calls init() once per page load (no "restart" button exists).
     state.submitted = false;
     state.answers = {};
     state.currentIndex = 0;
-    state.tabSwitchCount = 0;
+    state.violations = [];
 
     state.student = { name: studentName, rollNo };
     state.config = await DataLoader.resolveConfig();
@@ -100,9 +129,12 @@ const QuizEngine = (() => {
     return state.quiz[state.currentIndex];
   }
 
+  /** Returns whether the answer was actually persisted to localStorage (the in-memory
+   *  state.answers is always updated regardless, so nothing is lost for the rest of
+   *  this session — the return value only reflects survival across a refresh/close). */
   function recordAnswer(questionId, rawAnswer) {
     state.answers[questionId] = rawAnswer;
-    QuizStorage.saveProgress(state.config.quizId, state.student.rollNo, {
+    return QuizStorage.saveProgress(state.config.quizId, state.student.rollNo, {
       answers: state.answers, currentIndex: state.currentIndex
     });
   }
@@ -129,7 +161,11 @@ const QuizEngine = (() => {
     state.submitted = true;
     if (state.timer) state.timer.stop();
 
-    const scoreResult = Scorer.scoreQuiz(state.quiz, state.answers);
+    const scoreResult = Scorer.scoreQuiz(state.quiz, state.answers, state.config.negativeMarking);
+    const timeLimitSeconds = (state.config.timeLimitMinutes || 0) * 60;
+    const elapsedSeconds = state.timer
+      ? Math.round((Date.now() - state.timer.startTime) / 1000)
+      : null;
     const meta = {
       studentName: state.student.name,
       rollNo: state.student.rollNo,
@@ -137,7 +173,10 @@ const QuizEngine = (() => {
       quizId: state.config.quizId,
       submittedAt: new Date().toISOString(),
       autoSubmitted: isAutoSubmit,
-      tabSwitchCount: state.tabSwitchCount
+      violationCount: state.violations.length,
+      violationBreakdown: getViolationBreakdown(),
+      timeTakenSeconds: elapsedSeconds === null ? null : Math.min(elapsedSeconds, timeLimitSeconds || elapsedSeconds),
+      timeLimitSeconds: timeLimitSeconds || null
     };
     QuizStorage.saveResult(state.config.quizId, state.student.rollNo, { scoreResult, meta });
     QuizStorage.clearProgress(state.config.quizId, state.student.rollNo);
@@ -151,6 +190,6 @@ const QuizEngine = (() => {
   return {
     init, setTickHandler, setAutoSubmitHandler, getCurrentQuestion, recordAnswer,
     goToQuestion, nextQuestion, prevQuestion, getProgress,
-    submitQuiz, getState, recordTabSwitch
+    submitQuiz, getState, recordViolation, getViolationBreakdown
   };
 })();
