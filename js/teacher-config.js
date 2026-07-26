@@ -17,7 +17,6 @@ async function initTeacherPanel() {
   try {
     loadedBank = await DataLoader.loadQuestionBank(bankPath);
     populateFilterUI(loadedBank);
-    document.getElementById('filterSection').style.display = 'block';
     document.getElementById('bankLoadError').innerHTML = '';
     document.getElementById('bankStats').textContent =
       `Loaded ${loadedBank.length} questions from ${bankPath}.`;

@@ -357,6 +357,48 @@ input.paste-blocked, textarea.paste-blocked { animation: paste-blocked-flash 0.6
 }
 @keyframes ai-spin { to { transform: rotate(360deg); } }
 
+/* Teacher panel — step tabs. Each step-number chip cycles through the same
+   tokenizer-hero palette as the landing page's signature moment (a quiet
+   callback, not a repeat), so the wizard still feels like the same app
+   instead of a generic tab-strip component. */
+.tab-bar {
+  display: flex; flex-wrap: wrap; gap: 2px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 20px;
+}
+.tab-btn {
+  background: transparent; border: none; border-bottom: 2.5px solid transparent;
+  border-radius: 8px 8px 0 0;
+  padding: 10px 14px 11px;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  text-transform: none; letter-spacing: 0;
+  color: var(--graphite);
+  cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+  transition: color .12s ease, border-color .12s ease, background .12s ease;
+}
+.tab-btn:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--signal) 6%, transparent); }
+.tab-btn.active { color: var(--ink); border-bottom-color: var(--signal); }
+.tab-btn:disabled { color: var(--line); cursor: not-allowed; }
+
+.tab-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 4px; border-radius: 6px;
+  font-size: 10.5px; font-weight: 700; color: var(--console);
+}
+.tab-btn:nth-of-type(4n+1) .tab-num { background: var(--chip-amber); }
+.tab-btn:nth-of-type(4n+2) .tab-num { background: #9FD8CB; }
+.tab-btn:nth-of-type(4n+3) .tab-num { background: var(--chip-rose); }
+.tab-btn:nth-of-type(4n+4) .tab-num { background: #C9BFF7; }
+.tab-btn:disabled .tab-num { background: var(--line); color: var(--graphite); }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+@media (max-width: 640px) {
+  .tab-bar { flex-wrap: nowrap; overflow-x: auto; gap: 0; -webkit-overflow-scrolling: touch; }
+  .tab-btn { padding: 8px 10px 9px; font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+}
+
 /* Teacher dashboard — submissions table */
 .dash-table-wrap { overflow-x: auto; }
 .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: var(--font-serif); }

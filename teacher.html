@@ -21,7 +21,16 @@
     <p><a href="dashboard.html">Open Teacher Dashboard →</a> — view submissions, search, review answers, export reports (sign-in required).</p>
   </header>
 
-  <div class="card">
+  <div class="tab-bar" id="teacherTabBar">
+    <button class="tab-btn active" data-tab="load" onclick="switchTab('load')" type="button"><span class="tab-num">1</span><span>Load Bank</span></button>
+    <button class="tab-btn" data-tab="filter" onclick="switchTab('filter')" type="button" disabled><span class="tab-num">2</span><span>Filter</span></button>
+    <button class="tab-btn" data-tab="ai" onclick="switchTab('ai')" type="button" disabled><span class="tab-num">2b</span><span>AI Generate</span></button>
+    <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')" type="button" disabled><span class="tab-num">3</span><span>Settings</span></button>
+    <button class="tab-btn" data-tab="generate" onclick="switchTab('generate')" type="button" disabled><span class="tab-num">4</span><span>Generate</span></button>
+    <button class="tab-btn" data-tab="keywords" onclick="switchTab('keywords')" type="button" disabled><span class="tab-num">5</span><span>Keyword Bank</span></button>
+  </div>
+
+  <div class="card tab-panel active" id="loadPanel" data-tab="load">
     <h2>1. Load Question Bank</h2>
     <div class="field">
       <label>Question Bank JSON Path</label>
@@ -34,7 +43,7 @@
     <div id="bankStats" style="font-size:12.5px; color:var(--graphite); margin-top:8px;"></div>
   </div>
 
-  <div class="card" id="filterSection" style="display:none;">
+  <div class="card tab-panel" id="filterSection" data-tab="filter">
     <h2>2. Filter Questions</h2>
 
     <div class="field">
@@ -69,7 +78,7 @@
     <div id="coStats" style="font-size:12.5px; color:var(--graphite); margin:2px 0 4px;"></div>
   </div>
 
-  <div class="card" id="aiGenerateSection" style="display:none;">
+  <div class="card tab-panel" id="aiGenerateSection" data-tab="ai">
     <h2>2b. Generate Questions with AI (Hermes Agent)</h2>
     <p style="font-size:13px; color:var(--graphite); margin:0 0 14px;">
       Uses the topics/difficulty/question-types checked above, plus the Bloom distribution below, to have an LLM write new questions strictly from this unit's syllabus content (<code>docs/syllabus/</code>) and append them to the loaded bank. Requires this app's Vercel deployment (server-side Gemini key) — on GitHub Pages this will show a clear "not available here" message instead of failing silently.
@@ -108,7 +117,7 @@
     <div id="aiGenerateMeta" style="font-size:12.5px; color:var(--graphite); margin-top:8px;"></div>
   </div>
 
-  <div class="card" id="configSection" style="display:none;">
+  <div class="card tab-panel" id="configSection" data-tab="settings">
     <h2>3. Quiz Settings</h2>
 
     <div class="grid2">
@@ -182,7 +191,7 @@
     </div>
   </div>
 
-  <div class="card" id="generateSection" style="display:none;">
+  <div class="card tab-panel" id="generateSection" data-tab="generate">
     <h2>4. Generate</h2>
     <div class="btn-row">
       <button class="btn-primary" onclick="generateShareableLink()">Generate Shareable Student Link</button>
@@ -191,7 +200,7 @@
     <div id="linkOutput" style="display:none; margin-top:14px;"></div>
   </div>
 
-  <div class="card" id="keywordBankSection" style="display:none;">
+  <div class="card tab-panel" id="keywordBankSection" data-tab="keywords">
     <h2>5. Generate Keyword Bank from Syllabus (for AI-Graded Descriptive Answers)</h2>
     <p style="font-size:13px; color:var(--graphite); margin:0 0 14px;">
       Upload this unit's syllabus (.docx or .pdf) to extract weighted keywords, concepts, and technical terms for every descriptive/scenario/prompt-engineering/open-ended-debugging question in the loaded bank. Requires signing in as the instructor and this app's Vercel deployment. Re-uploading unchanged syllabus content skips regeneration automatically (no extra AI call).
@@ -243,15 +252,27 @@
 <script src="js/theme.js"></script>
 <script src="js/teacher-config.js"></script>
 <script>
-  // Reveal remaining sections once a bank is loaded successfully.
+  /** Switches which step's panel is visible; refuses to switch to a still-locked (disabled) tab. */
+  function switchTab(tabId) {
+    const tabBtn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+    if (!tabBtn || tabBtn.disabled) return;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === tabBtn));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.tab === tabId));
+  }
+
+  /** Unlocks every tab except "load" (which is always enabled) — called once a bank is loaded. */
+  function unlockAllTabs() {
+    document.querySelectorAll('.tab-btn').forEach(b => { b.disabled = false; });
+  }
+
+  // Unlock the rest of the wizard once a bank is loaded successfully, and move
+  // straight to Filter — the natural next step.
   const originalInit = initTeacherPanel;
   initTeacherPanel = async function() {
     await originalInit();
     if (loadedBank.length > 0) {
-      document.getElementById('aiGenerateSection').style.display = 'block';
-      document.getElementById('configSection').style.display = 'block';
-      document.getElementById('generateSection').style.display = 'block';
-      document.getElementById('keywordBankSection').style.display = 'block';
+      unlockAllTabs();
+      switchTab('filter');
     }
   };
 
