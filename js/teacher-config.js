@@ -159,3 +159,69 @@ function downloadConfigFile() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Hermes Agent integration — reads the requested Bloom-level percentages
+ * (six number inputs, one per level, in the "Generate with AI" card).
+ */
+const BLOOM_LEVELS = ['remember', 'understand', 'apply', 'analyze', 'evaluate', 'create'];
+
+function readBloomDistributionFromUI() {
+  const dist = {};
+  BLOOM_LEVELS.forEach(level => {
+    const el = document.getElementById('bloomPct-' + level);
+    if (el) dist[level] = parseInt(el.value, 10) || 0;
+  });
+  return dist;
+}
+
+function renderAiGenerationMeta(meta) {
+  const el = document.getElementById('aiGenerateMeta');
+  if (!el) return;
+  const parts = [`${meta.generated}/${meta.requested} generated`];
+  if (meta.droppedInvalid) parts.push(`${meta.droppedInvalid} dropped (invalid)`);
+  if (meta.droppedDuplicate) parts.push(`${meta.droppedDuplicate} dropped (duplicate)`);
+  el.textContent = `Hermes Agent: ${parts.join(' · ')} · model ${meta.model}`;
+}
+
+/**
+ * Calls the Hermes Agent (POST /api/generate-questions) using the same
+ * topic/difficulty/type checkboxes already populated by populateFilterUI(),
+ * plus the Bloom-distribution and question-count fields in the AI card.
+ * On success, the new questions are appended to loadedBank (the existing
+ * static bank is never discarded) and the whole filter/settings pipeline is
+ * refreshed exactly as if a bigger static bank had been loaded.
+ */
+async function generateQuestionsWithAI() {
+  const errorEl = document.getElementById('aiGenerateError');
+  const statusEl = document.getElementById('aiGenerateStatus');
+  const button = document.getElementById('aiGenerateBtn');
+
+  errorEl.innerHTML = '';
+  button.disabled = true;
+  statusEl.style.display = 'flex';
+
+  try {
+    const payload = {
+      unit: document.getElementById('unitSelect').value,
+      courseOutcome: document.getElementById('aiCourseOutcome').value || 'CO1',
+      topics: getCheckedValues('topicFilters'),
+      difficulty: getCheckedValues('difficultyFilters'),
+      questionTypes: getCheckedValues('typeFilters'),
+      bloomDistribution: readBloomDistributionFromUI(),
+      numQuestions: parseInt(document.getElementById('aiNumQuestions').value, 10) || 10
+    };
+
+    const result = await DataLoader.generateQuestions(payload);
+    loadedBank = loadedBank.concat(result.questions);
+    populateFilterUI(loadedBank);
+    document.getElementById('bankStats').textContent =
+      `Loaded ${loadedBank.length} questions (includes ${result.questions.length} newly AI-generated).`;
+    renderAiGenerationMeta(result.meta);
+  } catch (e) {
+    errorEl.innerHTML = `<div class="error-box">AI generation failed: ${e.message}</div>`;
+  } finally {
+    button.disabled = false;
+    statusEl.style.display = 'none';
+  }
+}

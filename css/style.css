@@ -342,6 +342,21 @@ input.paste-blocked, textarea.paste-blocked { animation: paste-blocked-flash 0.6
 .error-box { background: color-mix(in srgb, var(--error) 12%, var(--surface)); color: var(--error); border-radius: 10px; padding: 12px 14px; font-size: 13px; margin: 14px 0; font-family: var(--font-serif); }
 .empty-state { color: var(--graphite); font-size: 13px; padding: 24px; text-align: center; border: 1.5px dashed var(--line); border-radius: 10px; font-family: var(--font-mono); }
 
+/* Hermes Agent — AI question generation loading state */
+.ai-generate-status {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 14px; font-size: 13px; font-family: var(--font-mono);
+  color: var(--signal);
+}
+.ai-spinner {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--signal) 25%, transparent);
+  border-top-color: var(--signal);
+  animation: ai-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+
 /* Responsive */
 @media (max-width: 640px) {
   .grid2, .grid3, .nav-grid { grid-template-columns: 1fr; }

@@ -68,6 +68,45 @@
     <div id="coStats" style="font-size:12.5px; color:var(--graphite); margin:2px 0 4px;"></div>
   </div>
 
+  <div class="card" id="aiGenerateSection" style="display:none;">
+    <h2>2b. Generate Questions with AI (Hermes Agent)</h2>
+    <p style="font-size:13px; color:var(--graphite); margin:0 0 14px;">
+      Uses the topics/difficulty/question-types checked above, plus the Bloom distribution below, to have an LLM write new questions strictly from this unit's syllabus content (<code>docs/syllabus/</code>) and append them to the loaded bank. Requires this app's Vercel deployment (server-side Gemini key) — on GitHub Pages this will show a clear "not available here" message instead of failing silently.
+    </p>
+
+    <div class="grid2">
+      <div class="field">
+        <label>Course Outcome</label>
+        <input type="text" id="aiCourseOutcome" value="CO1">
+      </div>
+      <div class="field">
+        <label>Number of AI Questions to Generate</label>
+        <input type="number" id="aiNumQuestions" value="5" min="1" max="40">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Bloom's Taxonomy Distribution (approximate %, should sum to 100)</label>
+      <div class="grid3" style="gap:10px;">
+        <div class="field"><label style="font-size:11px;">Remember</label><input type="number" id="bloomPct-remember" value="20" min="0" max="100"></div>
+        <div class="field"><label style="font-size:11px;">Understand</label><input type="number" id="bloomPct-understand" value="20" min="0" max="100"></div>
+        <div class="field"><label style="font-size:11px;">Apply</label><input type="number" id="bloomPct-apply" value="20" min="0" max="100"></div>
+        <div class="field"><label style="font-size:11px;">Analyze</label><input type="number" id="bloomPct-analyze" value="15" min="0" max="100"></div>
+        <div class="field"><label style="font-size:11px;">Evaluate</label><input type="number" id="bloomPct-evaluate" value="15" min="0" max="100"></div>
+        <div class="field"><label style="font-size:11px;">Create</label><input type="number" id="bloomPct-create" value="10" min="0" max="100"></div>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-primary" id="aiGenerateBtn" onclick="generateQuestionsWithAI()">Generate with AI (Hermes)</button>
+    </div>
+    <div id="aiGenerateStatus" class="ai-generate-status" style="display:none;">
+      <span class="ai-spinner" aria-hidden="true"></span> Hermes is generating your quiz…
+    </div>
+    <div id="aiGenerateError"></div>
+    <div id="aiGenerateMeta" style="font-size:12.5px; color:var(--graphite); margin-top:8px;"></div>
+  </div>
+
   <div class="card" id="configSection" style="display:none;">
     <h2>3. Quiz Settings</h2>
 
@@ -175,6 +214,7 @@
   initTeacherPanel = async function() {
     await originalInit();
     if (loadedBank.length > 0) {
+      document.getElementById('aiGenerateSection').style.display = 'block';
       document.getElementById('configSection').style.display = 'block';
       document.getElementById('generateSection').style.display = 'block';
     }

@@ -48,5 +48,44 @@ const DataLoader = (() => {
     return btoa(unescape(encodeURIComponent(json)));
   }
 
-  return { fetchJSON, resolveConfig, loadQuestionBank, encodeConfigToBase64 };
+  /**
+   * Calls the Hermes Agent's serverless endpoint (/api/generate-questions) to
+   * generate new questions with an LLM. Only works on a Vercel deployment.
+   * On any plain static host (GitHub Pages, a local `python -m http.server`,
+   * etc.) there's no server behind this path at all, so the response is some
+   * host-specific HTML/plaintext error page rather than JSON — that's the
+   * reliable signal used here (not a specific status code, since different
+   * static hosts return different codes for an unsupported POST: e.g. 404,
+   * 405, or Python's dev server's 501) to show a clear, actionable message
+   * instead of a raw fetch failure.
+   */
+  async function generateQuestions(payload) {
+    let res;
+    try {
+      res = await fetch("/api/generate-questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      throw new Error("Could not reach the AI generation service (network error).");
+    }
+
+    let body;
+    try {
+      body = await res.json();
+    } catch (e) {
+      throw new Error(
+        "AI question generation isn't available on this static hosting (no server). " +
+        "Open this app from its Vercel deployment to use 'Generate with AI'."
+      );
+    }
+
+    if (!res.ok) {
+      throw new Error(body?.error || `AI generation failed (HTTP ${res.status}).`);
+    }
+    return body;
+  }
+
+  return { fetchJSON, resolveConfig, loadQuestionBank, encodeConfigToBase64, generateQuestions };
 })();

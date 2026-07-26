@@ -316,19 +316,33 @@ Every JS module opens with a header comment explaining its responsibility and de
 
 ---
 
-## 17. Future AI Integration Design
+## 17. AI Integration — Hermes Agent (implemented)
 
-The architecture is deliberately structured so AI-assisted features can be added WITHOUT restructuring existing code:
+The dynamic question generation part of this section is now implemented (Phase 1 of a larger AI-platform plan). It's built as a set of small, focused modules rather than one large file:
 
-- **AI-generated question banks from PDFs/lecture notes:** since question banks are just JSON files matching a documented schema (Section 5.1), an instructor (or a separate offline tool/script using their own API key, run locally — never committed to the repo) could generate new `data/questions-unitN.json` files from source material and drop them in. No app code changes needed.
-- **AI-assisted grading of open-ended answers:** `scorer.js`'s `scoreOpenEnded()` function is intentionally isolated — a future version could swap the keyword-matching logic for a call to an LLM API, but only in a context where an API key can be safely handled (e.g. a small separate authenticated tool the instructor runs locally, not this public static site — see Security, Section 18). The current keyword-based approach was chosen specifically because it requires zero API keys and works entirely offline/client-side.
-- **Recommended extension point:** add an optional `aiSuggestedScore` field to the open-ended scoring result, populated by a separate offline batch process, without needing to change the student-facing app at all.
+- `lib/config.js` — reads all Hermes-related environment variables (Gemini key/model, GitHub owner/repo/branch, request limits) in one place.
+- `lib/githubRetriever.js` — fetches `docs/syllabus/unit{N}.md` for the requested unit from this repo (public, no token needed) to ground generation in real syllabus content, never anything invented.
+- `lib/promptBuilder.js` — turns a teacher's topic/difficulty/Bloom-distribution/question-type/count selections into the LLM prompt, embedding the exact question-object schema (Section 5.1) so the model's output matches it.
+- `lib/llmService.js` — the only module that calls the Gemini API (`generateContent`, JSON response mode), with retry-on-malformed-JSON.
+- `lib/questionValidator.js` — rejects any generated question missing required fields or with out-of-bounds answer indices, before it can reach a student.
+- `lib/duplicateChecker.js` — drops exact and near-duplicate questions (normalized text + token-overlap check).
+- `lib/hermesAgent.js` — orchestrates the above end-to-end and is the only module `api/generate-questions.js` (the Vercel serverless function) calls.
+
+On the frontend, `teacher.html`'s "Generate Questions with AI (Hermes Agent)" card calls `DataLoader.generateQuestions()` (`js/data-loader.js`) → `js/teacher-config.js`'s `generateQuestionsWithAI()`, which **appends** the results to the existing `loadedBank` array — the static, hand-authored question bank is never discarded or replaced. Because `randomizer.js`, `scorer.js`, and `question-renderer.js` are all schema-driven, AI-generated questions flow through the entire existing quiz-taking/scoring/PDF pipeline with no changes to those files.
+
+**This only works on the Vercel-hosted deployment** (the serverless function needs a server to run and a place to hold the Gemini API key). On GitHub Pages, the same "Generate with AI" button shows a clear message instead of failing silently, and the rest of the app — loading the static bank, filtering, configuring, sharing a link, taking a quiz — is completely unaffected.
+
+**Deliberately deferred to a later phase** (not silently dropped): LLM-based semantic grading of descriptive/scenario/prompt-engineering answers (today's `scoreOpenEnded()` in `scorer.js` remains synchronous keyword-matching, unchanged), a fuller analytics/CO-attainment dashboard, and a PDF report redesign. The extension points originally sketched below are now superseded by the modules listed above.
+
+- ~~AI-generated question banks from PDFs/lecture notes: an instructor (or a separate offline tool/script using their own API key, run locally) could generate new `data/questions-unitN.json` files from source material and drop them in.~~ — superseded by the in-app Hermes Agent above.
+- **AI-assisted grading of open-ended answers** (still future work): `scorer.js`'s `scoreOpenEnded()` function is intentionally isolated — a future version could swap the keyword-matching logic for a call to an LLM API via a new serverless endpoint, following the same "secret stays server-side" pattern the Hermes Agent already establishes.
+- **Recommended extension point:** add an optional `aiSuggestedScore` field to the open-ended scoring result, without needing to change the student-facing rendering at all.
 
 ---
 
 ## 18. Security Considerations & Limitations
 
-- **No API keys are used or required anywhere in this application.** All logic, including scoring, runs in the student's own browser.
+- **API keys:** the static GitHub Pages deployment still uses no API keys and runs entirely in the browser, as before. The Vercel deployment adds one server-side secret, `GEMINI_API_KEY`, read only inside the `/api/generate-questions` serverless function (`lib/config.js`) — it is never sent to or readable from client-side JS, and is stored as an encrypted Vercel Environment Variable, never committed to the repo (see `.env.example`).
 - **Client-side scoring is visible in principle** — a technically sophisticated student could open browser DevTools and inspect the correct answers in the loaded JSON before answering. This is an inherent limitation of any zero-backend static quiz app. Mitigations: (a) use seeded randomization so question order/selection varies per student, (b) treat high-stakes summative assessments with this limitation in mind — this tool is best suited for **formative/practice quizzes**, not final proctored exams, (c) consider a lightweight serverless function (e.g., Cloudflare Workers free tier) in a future iteration if a genuinely tamper-proof answer key is required.
 - **No student data leaves the browser** — results are only downloaded locally by the student; there is no automatic submission to the instructor. The instructor must collect downloaded CSV/JSON files (email, LMS upload, or a shared drive folder) to build a class report. This is the direct trade-off of having no backend/database.
 - **localStorage is per-browser/per-device** — a student switching devices mid-quiz loses their in-progress state (though not a submitted result, since that's downloaded as a file).
