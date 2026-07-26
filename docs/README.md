@@ -1,6 +1,6 @@
 # CSA65 Quiz Management System
 
-A production-ready, **fully client-side** quiz platform for *Generative AI and Large Language Models* (CSA65), built to run entirely on **GitHub Pages** with no backend server, no database, and no exposed API keys.
+A production-ready quiz platform for *Generative AI and Large Language Models* (CSA65). The quiz-taking experience itself is still **fully client-side** and runs on **GitHub Pages** with no exposed API keys. Two backends now sit alongside it, both opt-in and both degrading gracefully when absent: **Vercel serverless functions** (question generation + keyword-bank generation, both Gemini-backed) and **Firebase** (Firestore + Authentication, for persistent submission storage and the teacher dashboard). See Section 27 for the full picture and `docs/firebase-setup.md` for one-time setup.
 
 ---
 
@@ -52,13 +52,27 @@ csa65-quiz-app/
 │   ├── integrity.js              Fullscreen lockdown + violation detection
 │   ├── theme.js                  Light/dark mode toggle
 │   ├── quiz-engine.js             Orchestrates the full student workflow
-│   └── teacher-config.js         Drives teacher.html's filter/generate UI
+│   ├── teacher-config.js         Drives teacher.html's filter/generate UI
+│   ├── firebase-config.js        Public Firebase Web SDK config (Section 27)
+│   ├── auth-guard.js             Firebase Auth login gate (teacher.html Step 5 + dashboard.html)
+│   ├── firestore-client.js       Firestore client SDK wrapper (submissions read/write)
+│   ├── open-ended-grader.js      Calls the server keyword-bank grader, falls back to local scoring
+│   ├── submission-sync.js        Persists each submission to Firestore, retries on failure
+│   └── dashboard.js              Drives dashboard.html
+├── dashboard.html                 Teacher/Admin submissions dashboard (Firebase Auth-gated)
 ├── data/
 │   ├── questions-unit1.json       Sample Unit I question bank (19 Qs, all 9 types)
 │   ├── config-unit1-quiz1.json    Sample quiz configuration
 │   └── students-sample.json       Optional roster (name/roll pre-fill)
+├── api/
+│   ├── generate-questions.js      Vercel function — Hermes Agent question generation
+│   ├── generate-keywords.js       Vercel function — teacher-only keyword-bank generation
+│   └── grade-open-ended.js        Vercel function — server-side keyword-bank grading (no auth, called by students)
+├── lib/                           Server-side modules used only by api/ (see Section 17 & 27)
+├── firestore.rules                Firestore security rules (paste into console, see docs/firebase-setup.md)
 └── docs/
-    └── README.md                  This file
+    ├── README.md                  This file
+    └── firebase-setup.md          One-time Firebase project setup steps
 ```
 
 **Adding future units:** create `data/questions-unit2.json` (same schema), then either point a new teacher config's `questionBankFile` at it, or type the path directly into the teacher panel's "Question Bank JSON Path" field.
@@ -189,6 +203,35 @@ csa65-quiz-app/
 { "students": [ { "rollNo": "21CS001", "name": "Student One" } ] }
 ```
 
+### 5.4 Firestore `submissions/{quizId}__{rollNo}` (Section 27)
+```jsonc
+{
+  "quizId": "...", "unit": "I", "quizTitle": "...", "topics": ["Tokenization", "..."],
+  "student": { "name": "...", "rollNo": "..." },
+  "questionSnapshot": [ /* full question objects, same shape as Section 5.1 */ ],
+  "answers": { "u1-mcq-001": 1, "u1-descriptive-004": "..." },
+  "perQuestion": [ { "questionId","topic","type","bloom","marks","question","earned","max","correct","needsReview","keywordsFound","keywordsMissing","feedback","suggestedImprovement" } ],
+  "totalEarned": 27.5, "totalMax": 30, "percentage": 91.7, "passingPercentage": 50, "passed": true,
+  "timeTakenSeconds": 1340, "timeLimitSeconds": 1500, "autoSubmitted": false, "autoSubmitReason": null,
+  "violations": [ { "type":"tabswitch", "at":"..." } ], "violationCount": 1, "violationBreakdown": {"tabswitch":1,"windowblur":0,"fullscreenexit":0},
+  "submittedAt": "<server timestamp>", "reviewStatus": "pending", "reviewedBy": null, "reviewedAt": null
+}
+```
+
+### 5.5 Firestore `keywordBanks/{unit}` (Section 17/27 — never readable/writable by any client, admin-SDK only)
+```jsonc
+{
+  "unit": "I", "sourceContentHash": "sha256...", "generatedAt": "<server timestamp>", "generatedBy": "...", "model": "gemini-2.0-flash",
+  "entries": {
+    "u1-descriptive-004": {
+      "topic": "Tokenization", "questionText": "...",
+      "keywords": [ { "term":"byte-pair encoding", "category":"concept", "weight":3, "synonyms":["BPE","byte pair encoding"] } ],
+      "totalWeight": 12, "targetWeightForFullMarks": 9, "minKeywordsForFullMarks": 3
+    }
+  }
+}
+```
+
 ---
 
 ## 6. JavaScript Architecture and Module Organization
@@ -205,8 +248,14 @@ csa65-quiz-app/
 | `pdf-report.js` | client-side PDF report (jsPDF, CDN-loaded on demand) | none |
 | `integrity.js` | fullscreen lockdown, violation detection, input blocking | none |
 | `theme.js` | light/dark mode toggle | none |
-| `quiz-engine.js` | orchestrates all of the above into the full workflow | all of the above |
-| `teacher-config.js` | drives the teacher filter/generate UI | `data-loader.js` |
+| `quiz-engine.js` | orchestrates all of the above into the full workflow | all of the above, plus `open-ended-grader.js` + `submission-sync.js` |
+| `teacher-config.js` | drives the teacher filter/generate UI | `data-loader.js`, `auth-guard.js` (Step 5 only) |
+| `firebase-config.js` | public Firebase Web SDK config + `FirebaseApp.isConfigured()` | firebase compat SDK (CDN) |
+| `auth-guard.js` | Firebase Auth login gate, ID tokens | `firebase-config.js` |
+| `firestore-client.js` | Firestore reads/writes for submissions | `firebase-config.js` |
+| `open-ended-grader.js` | calls `/api/grade-open-ended`, falls back to `scorer.js` locally | `scorer.js` |
+| `submission-sync.js` | writes a completed submission to Firestore, retries on failure | `firestore-client.js`, `firebase-config.js` |
+| `dashboard.js` | drives `dashboard.html` (search/filter/review/export) | `auth-guard.js`, `firestore-client.js`, `export.js`, `pdf-report.js` |
 
 Every module uses the **Revealing Module Pattern** (`const X = (() => {...; return {...}; })();`) — no classes except `QuizTimer`, no external dependencies, no bundler needed. Each file can be opened and edited independently.
 
@@ -243,7 +292,7 @@ Both modes also optionally shuffle each MCQ/multiselect question's **option orde
 | Multi-Select | **Proportional**: `max(0, correctSelected − incorrectSelected) / totalCorrect × marks` — rewards partial knowledge, penalizes wild guessing |
 | Fill-in-the-Blank, Code Output | Case-insensitive (configurable) match against a list of acceptable answers |
 | Debugging | Same as Fill-Blank if `acceptableAnswers` provided; otherwise treated as open-ended |
-| Descriptive, Scenario, Prompt Engineering | **Keyword-based suggested score**: counts how many of the question's tagged keywords appear in the student's answer, scaled against `minKeywordsForFullMarks`. Always flagged `needsReview: true` — **this is a fast first-pass suggestion, not true semantic grading** (see Section 18, Security & Limitations) |
+| Descriptive, Scenario, Prompt Engineering | **Weighted keyword-bank scoring when available** (Section 17/27): `js/open-ended-grader.js` sends the answer to `/api/grade-open-ended`, which scores it server-side against a teacher-generated, weighted, synonym-aware keyword bank (`lib/keywordMatcher.js`) and returns matched/missing keywords + feedback + a suggested improvement. **Falls back automatically** to the original plain-keyword `scoreOpenEnded()` in `scorer.js` (counts tagged `keywords[]` present in the answer, scaled against `minKeywordsForFullMarks`) whenever no bank has been generated for that unit, or the Vercel deployment isn't reachable (e.g. plain GitHub Pages). Always flagged `needsReview: true` either way — **this remains keyword-based, not full semantic understanding** (see Section 18) |
 
 **Negative marking** (optional, `config.negativeMarking`, Section 5.2): when enabled, deducts `penaltyFraction × marks` from a WRONG answer on MCQ / True-False / Fill-Blank / Code Output. Not applied to Multi-Select (already proportional) or open-ended types (never definitively "wrong"). The quiz total is floored at 0 overall.
 
@@ -274,6 +323,9 @@ Both modes also optionally shuffle each MCQ/multiselect question's **option orde
 4. **Generate** — either:
    - **Shareable link** (recommended): the entire config is base64-encoded directly into the URL query string. Zero repo commits needed — copy the link, send it to students, done.
    - **Download config JSON**: for instructors who prefer to commit a permanent config file to the repo (e.g. `data/config-unit1-final.json`) for long-term recordkeeping.
+5. **Generate Keyword Bank from Syllabus** (Section 17/27) — the only part of `teacher.html` that requires signing in. Upload a `.docx`/`.pdf` syllabus for the selected unit; a Vercel function extracts its text, hashes it, skips re-generation if unchanged, and otherwise asks Gemini to produce a weighted keyword bank for every descriptive/scenario/prompt-engineering/open-debugging question, storing it in Firestore for `open-ended-grader.js` to use automatically on future submissions.
+
+Steps 1-4 never touch student data and remain fully unauthenticated, exactly as before — only Step 5 requires sign-in.
 
 ---
 
@@ -283,8 +335,7 @@ Both modes also optionally shuffle each MCQ/multiselect question's **option orde
 2. Enter name + roll number → click **Start Quiz**.
 3. Answer questions one at a time; navigate with Previous/Next; progress bar and timer update live.
 4. Click **Submit Quiz** any time (with a confirmation if questions are unanswered), or the quiz **auto-submits** when time runs out.
-5. See an instant results screen: score, percentage, pass/fail, per-question breakdown, and (if enabled) explanations.
-6. Download the result as CSV or JSON for personal records or to submit to the instructor.
+5. See an instant results screen: score, percentage, and pass/fail only. **Answer-by-answer review and report downloads are instructor-only now** (Section 18/27) — behind the scenes, the submission (full question snapshot, answers, per-question marks, violation log, timestamps) is synced to Firestore for the instructor to review on `dashboard.html`; if that sync fails (e.g. no connection at the exact moment of submission), it's saved locally and retried automatically next time the student's device is online.
 
 ---
 
@@ -332,20 +383,20 @@ On the frontend, `teacher.html`'s "Generate Questions with AI (Hermes Agent)" ca
 
 **This only works on the Vercel-hosted deployment** (the serverless function needs a server to run and a place to hold the Gemini API key). On GitHub Pages, the same "Generate with AI" button shows a clear message instead of failing silently, and the rest of the app — loading the static bank, filtering, configuring, sharing a link, taking a quiz — is completely unaffected.
 
-**Deliberately deferred to a later phase** (not silently dropped): LLM-based semantic grading of descriptive/scenario/prompt-engineering answers (today's `scoreOpenEnded()` in `scorer.js` remains synchronous keyword-matching, unchanged), a fuller analytics/CO-attainment dashboard, and a PDF report redesign. The extension points originally sketched below are now superseded by the modules listed above.
+**Keyword-bank generation (implemented, Section 27):** a second, related pipeline — `api/generate-keywords.js` → `lib/keywordBankBuilder.js` → `lib/keywordPromptBuilder.js` → `lib/llmService.js`'s `callGemini()` (reused, not duplicated) → `lib/keywordBankValidator.js` — extracts weighted keywords/synonyms/concepts/learning-objectives per descriptive/scenario/prompt-engineering/open-debugging question from a teacher-uploaded syllabus (`lib/documentTextExtractor.js`, via `mammoth`/`pdf-parse`), and stores the result in Firestore (`keywordBanks/{unit}`, Section 5.5) via `lib/firebaseAdmin.js`. Teacher-only, gated by a Firebase ID token checked against `TEACHER_EMAILS`. Regeneration is skipped automatically when the syllabus's extracted-text hash is unchanged (`sourceContentHash`, computed with Node's built-in `crypto`, no extra dependency).
 
-- ~~AI-generated question banks from PDFs/lecture notes: an instructor (or a separate offline tool/script using their own API key, run locally) could generate new `data/questions-unitN.json` files from source material and drop them in.~~ — superseded by the in-app Hermes Agent above.
-- **AI-assisted grading of open-ended answers** (still future work): `scorer.js`'s `scoreOpenEnded()` function is intentionally isolated — a future version could swap the keyword-matching logic for a call to an LLM API via a new serverless endpoint, following the same "secret stays server-side" pattern the Hermes Agent already establishes.
-- **Recommended extension point:** add an optional `aiSuggestedScore` field to the open-ended scoring result, without needing to change the student-facing rendering at all.
+**AI-assisted grading of open-ended answers (implemented, deliberately NOT an LLM call per answer):** `api/grade-open-ended.js` scores each descriptive/scenario/prompt-engineering answer against the keyword bank above using `lib/keywordMatcher.js` — a plain, deterministic, weighted word-boundary + synonym matcher (no LLM call at grading time, by design: no added cost/latency per submission, and the weighted "answer key" itself never has to be sent to a student's browser to be graded). `js/open-ended-grader.js` calls this endpoint and falls back to the original local `scorer.js scoreOpenEnded()` on any failure — see Section 9.
+
+**Deliberately still deferred:** true LLM-based semantic grading (paraphrase understanding beyond keyword/synonym matching) and a fuller analytics/CO-attainment dashboard beyond what `dashboard.html` already provides (Section 28).
 
 ---
 
 ## 18. Security Considerations & Limitations
 
-- **API keys:** the static GitHub Pages deployment still uses no API keys and runs entirely in the browser, as before. The Vercel deployment adds one server-side secret, `GEMINI_API_KEY`, read only inside the `/api/generate-questions` serverless function (`lib/config.js`) — it is never sent to or readable from client-side JS, and is stored as an encrypted Vercel Environment Variable, never committed to the repo (see `.env.example`).
-- **Client-side scoring is visible in principle** — a technically sophisticated student could open browser DevTools and inspect the correct answers in the loaded JSON before answering. This is an inherent limitation of any zero-backend static quiz app. Mitigations: (a) use seeded randomization so question order/selection varies per student, (b) treat high-stakes summative assessments with this limitation in mind — this tool is best suited for **formative/practice quizzes**, not final proctored exams, (c) consider a lightweight serverless function (e.g., Cloudflare Workers free tier) in a future iteration if a genuinely tamper-proof answer key is required.
-- **No student data leaves the browser** — results are only downloaded locally by the student; there is no automatic submission to the instructor. The instructor must collect downloaded CSV/JSON files (email, LMS upload, or a shared drive folder) to build a class report. This is the direct trade-off of having no backend/database.
-- **localStorage is per-browser/per-device** — a student switching devices mid-quiz loses their in-progress state (though not a submitted result, since that's downloaded as a file).
+- **API keys:** the static GitHub Pages deployment still uses no API keys and runs entirely in the browser, as before. The Vercel deployment holds server-side secrets — `GEMINI_API_KEY` and `FIREBASE_SERVICE_ACCOUNT_BASE64` — read only inside serverless functions (`lib/config.js`, `lib/firebaseAdmin.js`); never sent to or readable from client-side JS, stored as encrypted Vercel Environment Variables, never committed to the repo (see `.env.example`). The client-side `js/firebase-config.js` values are **not** secrets — see Section 27 for why that's fine.
+- **Client-side MCQ/objective scoring is still visible in principle** — a technically sophisticated student could open DevTools and inspect correct answers in the loaded JSON before answering. Unchanged limitation of the objective-question path (Section 9); mitigations unchanged (seeded randomization, treat this as a **formative/practice** tool). The descriptive-answer keyword bank does **not** have this exposure — it's graded server-side and never sent to the client at all (Section 27).
+- **Student submissions now leave the browser** (Section 27) — this supersedes the old "no student data leaves the browser" limitation. Firestore security rules validate submission shape/gross bounds on the public `create` path but cannot verify full per-question correctness (rules can't loop over list elements) — see `firestore.rules`'s own comment block and Section 27 for the exact gap and why it's an accepted tradeoff.
+- **localStorage is still per-browser/per-device** for in-progress answers and as an offline fallback for the final result — a student switching devices mid-quiz still loses in-progress state, though a submitted result now also reaches Firestore (subject to the sync/retry caveat in Section 27) once the student is back online.
 
 ---
 
@@ -449,3 +500,36 @@ The report includes: student details (name, roll number, quiz ID), date/time sub
 ## 26. Light / Dark Mode (`js/theme.js`)
 
 A toggle button (top-right of the header on all three pages) switches between light and dark themes, persisted to `localStorage` and applied instantly via a small inline `<head>` script (before the stylesheet paints, to avoid a flash of the wrong theme). If no preference has been saved yet, the app follows the OS/browser's `prefers-color-scheme`. All colors are CSS custom properties (`css/style.css`, `:root` / `:root[data-theme="dark"]`), so both themes stay in sync automatically as the palette evolves.
+
+---
+
+## 27. Persistent Storage — Firestore (`js/firestore-client.js`, `js/submission-sync.js`)
+
+**Before this feature:** every student result lived only in `localStorage` (`js/storage.js`, keys `csa65result::{quizId}::{rollNo}`), per browser/device, and reached the instructor only if the student manually downloaded and sent a CSV/JSON/PDF file. There was no way for one browser to see another's data.
+
+**Now:** `QuizEngine.submitQuiz()` (`js/quiz-engine.js`) still writes to `localStorage` first, exactly as before (unchanged — this remains the resume/offline fallback), and then calls `SubmissionSync.sync()` to write the full submission (Section 5.4) directly to Firestore via the client SDK, from the student's unauthenticated browser. This is a public `create`-only write path — Firestore Security Rules (`firestore.rules`) validate the document's shape and gross mark bounds before accepting it, and deny all `read`/`update`/`delete` to anyone but the signed-in teacher. The document ID is deterministic (`{quizId}__{rollNo}`), mirroring the existing single-attempt `localStorage` key scheme — a resubmission for the same quiz+student naturally fails as `ALREADY_EXISTS` rather than needing extra rule logic.
+
+**Honest limitation** (same posture as `js/integrity.js`'s own disclosed limitations, Section 24): the rules validate *shape and gross bounds*, not that every individual `perQuestion[i].earned` is truly consistent with the corresponding answer — `rules_version = '2'` cannot loop over list elements. A determined client could still hand-craft a structurally valid but fabricated result. Closing that gap fully would require a Cloud Functions trigger to re-score server-side, which forces Firebase's paid Blaze plan — deliberately out of scope; see the comment block at the top of `firestore.rules`.
+
+**Retry behavior:** there's no service worker in this static app, so a failed Firestore write (e.g. no connection at the exact moment of submission) can only be retried on a later page load, not truly in the background. `SubmissionSync` keeps the failed document in `localStorage` under a `csa65pendingsync::` key and flushes it via `retryPending()`, called once when `student.html` loads.
+
+**Why Firebase config values are safe to commit** (`js/firebase-config.js`): a Firebase Web SDK config (`apiKey`, `authDomain`, `projectId`, etc.) is not a secret by design — anyone can already see it by opening DevTools on any Firebase web app. The actual security boundary is `firestore.rules`, enforced server-side by Google, not the secrecy of these values.
+
+**Keyword bank storage** (`keywordBanks/{unit}`, Section 5.5) is the opposite trust model: **never** readable or writable by any client (`allow read, write: if false` in `firestore.rules`) — both generation (`api/generate-keywords.js`) and grading-time reads (`api/grade-open-ended.js`) go through the Firebase Admin SDK (`lib/firebaseAdmin.js`), which bypasses client rules entirely. This is deliberate: the keyword bank is effectively the weighted "answer key" for descriptive questions, and unlike a plain MCQ `correctAnswer` index (already disclosed as visible-in-principle, Section 18), a weighted keyword/synonym checklist is directly and precisely gameable if exposed.
+
+**One-time setup required** (cannot be automated from this codebase — needs Firebase console + Vercel dashboard access): see `docs/firebase-setup.md` for creating the project, enabling Firestore + Authentication, creating the one teacher account, pasting in `firestore.rules`, and setting the new environment variables (`FIREBASE_SERVICE_ACCOUNT_BASE64`, `TEACHER_EMAILS`, alongside the existing `GEMINI_API_KEY`). Until that's done, `FirebaseApp.isConfigured()` returns `false` and every Firebase-dependent feature degrades to a clear "not configured yet" message instead of throwing — the rest of the app (quiz-taking, MCQ scoring, teacher config Steps 1-4) is completely unaffected.
+
+---
+
+## 28. Teacher Dashboard (`dashboard.html`, `js/dashboard.js`)
+
+A new, Firebase-Auth-gated page — nothing renders until the instructor signs in (`js/auth-guard.js`), since Firestore's security rules would deny the reads anyway. Once signed in:
+
+- **Search by Register Number** — exact match against `student.rollNo`.
+- **Filter by Unit / Topic / Date range** — Unit and date range are top-level fields on each submission (Section 5.4); Topic is a Firestore `array-contains` query against a `topics[]` field (a deduped list of every topic the attempt's questions covered — added specifically because one submission spans many topics, not one).
+- **View answers + evaluation details** — clicking a row expands the full per-question breakdown inline: the question text, the student's formatted answer, the correct/expected answer (both via `PDFReport.formatStudentAnswer()`/`formatCorrectAnswer()`, reused rather than re-implemented), and — for keyword-bank-graded answers — matched/missing keywords, feedback, and the suggested improvement (Section 27).
+- **Download reports** — per-student CSV/PDF reuse the *existing* `js/export.js` (`exportStudentResultCSV`) and `js/pdf-report.js` (`PDFReport.generate()`) unchanged, since a Firestore submission document's field names already match what those functions expect. Bulk **Export Filtered (CSV)** is a new function, `Exporter.exportSubmissionsCSV()` (one row per submission, not per question).
+
+`teacher.html`'s existing 4-step quiz-configuration wizard is untouched and still requires no sign-in at all — only its new Step 5 (keyword-bank generation, Section 17/27) and this dashboard require authentication, since those are the only parts that touch student answers or cost a Gemini call.
+
+**Assessment repository:** requirement item 6 (question paper / answer key / responses / evaluation / analytics / reports, all in one place) is satisfied by the combination already described above rather than a separate duplicate store: `submissions/*` holds the question-paper snapshot + student responses + evaluation together per attempt, `keywordBanks/{unit}` is the generated "answer key" for descriptive questions, and this dashboard is the analytics/reporting surface over both — no additional collection was introduced to avoid duplicating data that's already queryable here.

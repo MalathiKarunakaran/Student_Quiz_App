@@ -215,5 +215,9 @@ const PDFReport = (() => {
     doc.save(`${meta.quizId}_${meta.rollNo}_report.pdf`);
   }
 
-  return { generate, computeGrade };
+  // formatStudentAnswer/formatCorrectAnswer are also exported (beyond just
+  // being used internally by generate()) so js/dashboard.js can render the
+  // same human-readable answer text inline, instead of duplicating this
+  // per-question-type formatting logic.
+  return { generate, computeGrade, formatStudentAnswer, formatCorrectAnswer };
 })();

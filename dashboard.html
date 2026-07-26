@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teacher Dashboard — CSA65 Quiz Management System</title>
+<script>(function(){try{var t=localStorage.getItem('csa65theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="app-header">
+    <button class="theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="Toggle dark/light mode">🌙 Dark Mode</button>
+    <div class="institution-strip">
+      <div class="institution-badge"><img src="assets/img/simats-logo.png" alt="SIMATS logo"></div>
+      <div class="institution-badge"><img src="assets/img/sse-logo.png" alt="SIMATS Engineering logo"></div>
+    </div>
+    <div class="eyebrow">CSA65 · Teacher Dashboard</div>
+    <h1>Submissions Dashboard</h1>
+    <p>Search, filter, review, and export every student submission. Sign-in required — <a href="teacher.html" style="color:inherit;">← back to quiz configuration</a>.</p>
+  </header>
+
+  <div id="dashLoginGate"></div>
+
+  <div id="dashContent" style="display:none;">
+    <div class="card">
+      <h2>Filters</h2>
+      <div class="grid3">
+        <div class="field">
+          <label>Search by Roll Number</label>
+          <input type="text" id="filterRollNo" placeholder="e.g. 21CS045">
+        </div>
+        <div class="field">
+          <label>Unit</label>
+          <select id="filterUnit">
+            <option value="">All Units</option>
+            <option value="I">Unit I</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Topic</label>
+          <input type="text" id="filterTopic" placeholder="e.g. Tokenization">
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label>Submitted From</label>
+          <input type="date" id="filterFromDate">
+        </div>
+        <div class="field">
+          <label>Submitted To</label>
+          <input type="date" id="filterToDate">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" onclick="Dashboard.applyFilters()">Search / Filter</button>
+        <button class="btn-secondary" onclick="Dashboard.clearFilters()">Clear Filters</button>
+        <button class="btn-secondary" onclick="Dashboard.exportFilteredCSV()">Export Filtered (CSV)</button>
+        <button class="btn-secondary" onclick="AuthGuard.signOut()">Sign Out</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Submissions</h2>
+      <div id="dashError"></div>
+      <div id="dashSummary" style="font-size:12.5px; color:var(--graphite); margin-bottom:10px;"></div>
+      <div id="dashTableWrap" class="dash-table-wrap"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/auth-guard.js"></script>
+<script src="js/firestore-client.js"></script>
+<script src="js/export.js"></script>
+<script src="js/pdf-report.js"></script>
+<script src="js/theme.js"></script>
+<script src="js/dashboard.js"></script>
+<script>
+  Dashboard.init();
+  Theme.init();
+</script>
+</body>
+</html>

@@ -192,6 +192,71 @@ function renderAiGenerationMeta(meta) {
  * static bank is never discarded) and the whole filter/settings pipeline is
  * refreshed exactly as if a bigger static bank had been loaded.
  */
+/** Reads a File as base64 (no "data:...;base64," prefix — the server expects raw base64). */
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",").pop());
+    reader.onerror = () => reject(new Error("Could not read the selected file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Uploads the syllabus file selected in Step 5 and calls the Hermes keyword-
+ * bank endpoint (/api/generate-keywords), teacher-auth-gated. On success, the
+ * generated bank is stored server-side in Firestore (keywordBanks/{unit}) —
+ * nothing further is needed client-side for student.html's grading to pick
+ * it up automatically on next submit.
+ */
+async function generateKeywordBankFromSyllabus() {
+  const errorEl = document.getElementById('keywordBankError');
+  const statusEl = document.getElementById('keywordBankStatus');
+  const metaEl = document.getElementById('keywordBankMeta');
+  const button = document.getElementById('keywordBankGenerateBtn');
+  const fileInput = document.getElementById('syllabusFile');
+
+  errorEl.innerHTML = '';
+  metaEl.textContent = '';
+
+  const file = fileInput.files[0];
+  if (!file) {
+    errorEl.innerHTML = '<div class="error-box">Choose a .docx or .pdf syllabus file first.</div>';
+    return;
+  }
+
+  button.disabled = true;
+  statusEl.style.display = 'flex';
+
+  try {
+    const idToken = await AuthGuard.getIdToken();
+    const fileBase64 = await readFileAsBase64(file);
+    const unit = document.getElementById('unitSelect').value;
+    const unitTitle = document.getElementById('unitSelect').selectedOptions[0].textContent;
+
+    const result = await DataLoader.generateKeywords({
+      unit,
+      unitTitle,
+      filename: file.name,
+      fileBase64,
+      forceRegenerate: document.getElementById('forceRegenerate').checked
+    }, idToken);
+
+    if (result.skipped) {
+      metaEl.textContent = result.reason;
+    } else {
+      metaEl.textContent = `Keyword bank generated: ${result.coverage.generated}/${result.coverage.requested} questions covered` +
+        (result.coverage.droppedCount ? `, ${result.coverage.droppedCount} dropped (invalid)` : '') +
+        ` · model ${result.model}.`;
+    }
+  } catch (e) {
+    errorEl.innerHTML = `<div class="error-box">Keyword bank generation failed: ${e.message}</div>`;
+  } finally {
+    button.disabled = false;
+    statusEl.style.display = 'none';
+  }
+}
+
 async function generateQuestionsWithAI() {
   const errorEl = document.getElementById('aiGenerateError');
   const statusEl = document.getElementById('aiGenerateStatus');

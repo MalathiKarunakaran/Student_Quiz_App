@@ -66,5 +66,27 @@ const Exporter = (() => {
     downloadFile(`${meta.quizId}_${meta.rollNo}_result.json`, JSON.stringify(payload, null, 2), "application/json");
   }
 
-  return { downloadFile, exportStudentResultCSV, exportStudentResultJSON };
+  /**
+   * Bulk CSV export for the teacher dashboard — one row per submission
+   * (unlike exportStudentResultCSV's one-row-per-question detail for a
+   * single student). submissions: the array js/firestore-client.js
+   * querySubmissions() returns.
+   */
+  function exportSubmissionsCSV(submissions) {
+    const header = [
+      "Roll No", "Name", "Quiz ID", "Quiz Title", "Unit", "Marks Earned", "Max Marks",
+      "Percentage", "Passed", "Time Taken (seconds)", "Auto-Submitted", "Violation Count",
+      "Submitted At", "Review Status"
+    ];
+    const rows = submissions.map(s => [
+      s.student.rollNo, s.student.name, s.quizId, s.quizTitle, s.unit,
+      s.totalEarned, s.totalMax, s.percentage, s.passed ? "Yes" : "No",
+      s.timeTakenSeconds ?? "N/A", s.autoSubmitted ? "Yes" : "No", s.violationCount || 0,
+      s.submittedAt || "N/A", s.reviewStatus
+    ]);
+    const csvLines = [header.map(csvEscape).join(",")].concat(rows.map(r => r.map(csvEscape).join(",")));
+    downloadFile(`submissions_export_${Date.now()}.csv`, csvLines.join("\n"));
+  }
+
+  return { downloadFile, exportStudentResultCSV, exportStudentResultJSON, exportSubmissionsCSV };
 })();

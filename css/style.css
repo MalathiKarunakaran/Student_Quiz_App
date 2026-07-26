@@ -357,6 +357,18 @@ input.paste-blocked, textarea.paste-blocked { animation: paste-blocked-flash 0.6
 }
 @keyframes ai-spin { to { transform: rotate(360deg); } }
 
+/* Teacher dashboard — submissions table */
+.dash-table-wrap { overflow-x: auto; }
+.dash-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: var(--font-serif); }
+.dash-table th {
+  text-align: left; padding: 9px 10px; border-bottom: 2px solid var(--line);
+  font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em;
+  color: var(--graphite); white-space: nowrap;
+}
+.dash-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.dash-row { cursor: pointer; transition: background .1s ease; }
+.dash-row:hover { background: color-mix(in srgb, var(--signal) 6%, var(--surface)); }
+
 /* Responsive */
 @media (max-width: 640px) {
   .grid2, .grid3, .nav-grid { grid-template-columns: 1fr; }

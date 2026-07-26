@@ -87,5 +87,39 @@ const DataLoader = (() => {
     return body;
   }
 
-  return { fetchJSON, resolveConfig, loadQuestionBank, encodeConfigToBase64, generateQuestions };
+  /**
+   * Calls the teacher-only keyword-bank generation endpoint
+   * (/api/generate-keywords). Only works on a Vercel deployment, same
+   * static-hosting caveat as generateQuestions() above. idToken is the
+   * signed-in teacher's Firebase ID token (see js/auth-guard.js getIdToken()).
+   */
+  async function generateKeywords(payload, idToken) {
+    let res;
+    try {
+      res = await fetch("/api/generate-keywords", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${idToken}` },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      throw new Error("Could not reach the keyword-bank generation service (network error).");
+    }
+
+    let body;
+    try {
+      body = await res.json();
+    } catch (e) {
+      throw new Error(
+        "Keyword-bank generation isn't available on this static hosting (no server). " +
+        "Open this app from its Vercel deployment to use 'Generate Keyword Bank'."
+      );
+    }
+
+    if (!res.ok) {
+      throw new Error(body?.error || `Keyword-bank generation failed (HTTP ${res.status}).`);
+    }
+    return body;
+  }
+
+  return { fetchJSON, resolveConfig, loadQuestionBank, encodeConfigToBase64, generateQuestions, generateKeywords };
 })();

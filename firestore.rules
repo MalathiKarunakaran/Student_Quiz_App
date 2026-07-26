@@ -1,0 +1,75 @@
+rules_version = '2';
+
+// CSA65 Quiz Management System — Firestore Security Rules
+//
+// See docs/firebase-setup.md for how to paste this into the Firebase console
+// (or deploy via `firebase deploy --only firestore:rules` if you install the
+// Firebase CLI). This file is the source of truth — keep the console copy in
+// sync with it.
+//
+// HONEST LIMITATION (documented, not hidden — same posture as js/integrity.js):
+// rules_version 2 cannot loop over list elements, so `submissions` writes are
+// validated for SHAPE and GROSS BOUNDS only (field types present, total marks
+// within a plausible ceiling) — not that each individual perQuestion[i].earned
+// is genuinely consistent with answers[i]. A determined client could still
+// hand-craft a structurally valid but fabricated result. True per-question
+// server-side verification would require a Cloud Functions trigger, which
+// forces Firebase's paid Blaze plan — deliberately out of scope here.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Single-teacher deployment: change/extend this if a co-instructor needs
+    // dashboard access too (see docs/firebase-setup.md).
+    function isTeacher() {
+      return request.auth != null && request.auth.token.email == 'malathi.learning@gmail.com';
+    }
+
+    match /submissions/{submissionId} {
+      // Only the signed-in teacher can browse/review/finalize submissions.
+      allow read, update, delete: if isTeacher();
+
+      // Students are never authenticated — a submission is created directly
+      // from student.html at quiz-submit time. The deterministic document ID
+      // (quizId__rollNo, enforced client-side) means a second create for the
+      // same quiz+student naturally fails as ALREADY_EXISTS with no extra
+      // rule needed to block resubmission/tampering-via-overwrite.
+      allow create: if isWellFormedSubmission(request.resource.data);
+
+      function isWellFormedSubmission(d) {
+        let MAX_MARKS_PER_QUESTION = 10;
+        return
+          d.keys().hasAll([
+            'quizId', 'unit', 'student', 'questionSnapshot', 'answers',
+            'perQuestion', 'totalEarned', 'totalMax', 'percentage',
+            'submittedAt', 'reviewStatus', 'reviewedBy'
+          ]) &&
+          d.quizId is string && d.quizId.size() > 0 && d.quizId.size() < 200 &&
+          d.student is map &&
+          d.student.name is string && d.student.name.size() > 0 && d.student.name.size() < 200 &&
+          d.student.rollNo is string && d.student.rollNo.size() > 0 && d.student.rollNo.size() < 50 &&
+          d.questionSnapshot is list && d.questionSnapshot.size() > 0 && d.questionSnapshot.size() < 300 &&
+          d.answers is map &&
+          d.perQuestion is list &&
+          d.perQuestion.size() == d.questionSnapshot.size() &&
+          d.totalEarned is number && d.totalEarned >= 0 &&
+          d.totalMax is number && d.totalMax > 0 &&
+          d.totalEarned <= d.totalMax &&
+          d.totalMax <= d.questionSnapshot.size() * MAX_MARKS_PER_QUESTION &&
+          d.percentage is number && d.percentage >= 0 && d.percentage <= 100 &&
+          d.submittedAt == request.time &&   // forces FieldValue.serverTimestamp(), blocks backdating
+          d.reviewStatus == 'pending' &&     // can't self-mark reviewed/finalized
+          d.reviewedBy == null;
+      }
+    }
+
+    // The keyword bank is the weighted, per-question "answer key" for
+    // descriptive/scenario/prompt-engineering questions. It is intentionally
+    // NEVER readable or writable directly by any client — grading happens
+    // server-side in api/grade-open-ended.js, and generation/writes happen
+    // server-side in api/generate-keywords.js, both via the Admin SDK, which
+    // bypasses these rules entirely.
+    match /keywordBanks/{unit} {
+      allow read, write: if false;
+    }
+  }
+}

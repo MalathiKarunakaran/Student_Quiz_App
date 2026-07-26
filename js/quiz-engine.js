@@ -7,8 +7,11 @@
  *   3. Select N questions (seeded or true-random) + optionally shuffle options
  *   4. Render questions one at a time with navigation, progress bar, and timer
  *   5. Persist progress to localStorage as the student answers
- *   6. On submit (manual or auto via timer expiry): score, show results,
- *      offer CSV/JSON download
+ *   6. On submit (manual or auto via timer expiry): score objective questions
+ *      locally, upgrade open-ended questions to server-side keyword-bank
+ *      grading when available (js/open-ended-grader.js), sync the full result
+ *      to Firestore (js/submission-sync.js), and show a score-only summary —
+ *      answer review and report downloads are instructor-only (dashboard.html)
  * ---------------------------------------------------------------------------
  */
 
@@ -34,7 +37,7 @@ const QuizEngine = (() => {
    * Returns { count, type, triggeredSubmit, submitResult } so the caller can
    * update the UI and, if triggeredSubmit, show the results screen.
    */
-  function recordViolation(type) {
+  async function recordViolation(type) {
     if (state.submitted) return null;
     state.violations.push({ type, at: new Date().toISOString() });
     const count = state.violations.length;
@@ -49,7 +52,7 @@ const QuizEngine = (() => {
 
     let submitResult = null;
     if (triggeredSubmit) {
-      submitResult = submitQuiz(true);
+      submitResult = await submitQuiz(true);
       if (submitResult) submitResult.meta.autoSubmitReason = `violation-policy (${type})`;
     }
     return { count, type, triggeredSubmit, submitResult };
@@ -111,8 +114,8 @@ const QuizEngine = (() => {
       state.config.timeLimitMinutes,
       storageKey,
       (secondsRemaining) => onTick && onTick(secondsRemaining),
-      () => {
-        const result = submitQuiz(true);
+      async () => {
+        const result = await submitQuiz(true);
         if (result && onAutoSubmit) onAutoSubmit(result);
       }
     );
@@ -156,12 +159,44 @@ const QuizEngine = (() => {
     return { answered, total: state.quiz.length, percent: Math.round((answered / state.quiz.length) * 100) };
   }
 
-  function submitQuiz(isAutoSubmit = false) {
+  /**
+   * Merges server-graded (or locally-graded-as-fallback) open-ended results
+   * from OpenEndedGrader.gradeAll() over the plain-keyword results Scorer
+   * already computed for those same questions, then recomputes the quiz
+   * totals — the same aggregate arithmetic Scorer.scoreQuiz() uses
+   * internally, kept local here since it's only ever needed for this one
+   * merge step.
+   */
+  function mergeOpenEndedResults(scoreResult, openEndedResults) {
+    const perQuestion = scoreResult.perQuestion.map(r => {
+      const upgraded = openEndedResults[r.questionId];
+      return upgraded ? Object.assign({}, r, upgraded) : r;
+    });
+    const rawTotal = Math.round(perQuestion.reduce((s, r) => s + r.earned, 0) * 100) / 100;
+    const totalEarned = Math.max(0, rawTotal);
+    const totalMax = perQuestion.reduce((s, r) => s + r.max, 0);
+    const percentage = totalMax === 0 ? 0 : Math.round((totalEarned / totalMax) * 1000) / 10;
+    const anyNeedsReview = perQuestion.some(r => r.needsReview);
+    return { totalEarned, totalMax, percentage, perQuestion, anyNeedsReview };
+  }
+
+  async function submitQuiz(isAutoSubmit = false) {
     if (state.submitted) return null;
     state.submitted = true;
     if (state.timer) state.timer.stop();
 
-    const scoreResult = Scorer.scoreQuiz(state.quiz, state.answers, state.config.negativeMarking);
+    let scoreResult = Scorer.scoreQuiz(state.quiz, state.answers, state.config.negativeMarking);
+
+    // Upgrade descriptive/scenario/prompt-engineering/open-debugging questions
+    // to server-side keyword-bank grading when a bank exists for this unit;
+    // gracefully falls back to the plain-keyword result already computed
+    // above when the server/bank isn't reachable — see js/open-ended-grader.js.
+    const unit = (state.config.filters && state.config.filters.unit) || "";
+    const openEndedResults = await OpenEndedGrader.gradeAll(state.quiz, state.answers, unit);
+    if (Object.keys(openEndedResults).length > 0) {
+      scoreResult = mergeOpenEndedResults(scoreResult, openEndedResults);
+    }
+
     const timeLimitSeconds = (state.config.timeLimitMinutes || 0) * 60;
     const elapsedSeconds = state.timer
       ? Math.round((Date.now() - state.timer.startTime) / 1000)
@@ -173,6 +208,7 @@ const QuizEngine = (() => {
       quizId: state.config.quizId,
       submittedAt: new Date().toISOString(),
       autoSubmitted: isAutoSubmit,
+      violations: state.violations.slice(),
       violationCount: state.violations.length,
       violationBreakdown: getViolationBreakdown(),
       timeTakenSeconds: elapsedSeconds === null ? null : Math.min(elapsedSeconds, timeLimitSeconds || elapsedSeconds),
@@ -182,7 +218,12 @@ const QuizEngine = (() => {
     QuizStorage.clearProgress(state.config.quizId, state.student.rollNo);
     if (state.timer) state.timer.clearPersistence();
 
-    return { scoreResult, meta };
+    // Persistent (Firestore) copy, on top of the localStorage save above —
+    // never throws; see js/submission-sync.js for the retry-on-next-load
+    // behavior if this fails (e.g. offline at the moment of submission).
+    const syncResult = await SubmissionSync.sync({ config: state.config, quiz: state.quiz, answers: state.answers, scoreResult, meta });
+
+    return { scoreResult, meta, syncResult };
   }
 
   function getState() { return state; }

@@ -71,19 +71,19 @@
       <div class="grade-bar-row" id="gradeBandRow"></div>
     </div>
     <div id="resultReviewNote"></div>
-    <div id="resultBreakdown"></div>
-    <div class="btn-row">
-      <button class="btn-primary" id="downloadPdfBtn" onclick="downloadPDF()" style="display:none;">Download PDF Report</button>
-      <button class="btn-secondary" onclick="downloadCSV()">Download Result (CSV)</button>
-      <button class="btn-secondary" onclick="downloadJSON()">Download Result (JSON)</button>
-    </div>
+    <div class="footnote" id="resultSubmittedNote">Your answers have been submitted to your instructor. Detailed answer review and reports are available from your instructor only.</div>
+    <div class="footnote" id="resultSyncStatus"></div>
   </div>
 
   <div class="footnote">
-    CSA65 Quiz Management System — all scoring happens locally in your browser. Descriptive/scenario/prompt-engineering answers receive a suggested score only; your instructor reviews these before finalizing marks.
+    CSA65 Quiz Management System — objective questions are scored locally in your browser; descriptive/scenario/prompt-engineering answers receive an automated keyword-based suggested score, reviewed by your instructor before marks are finalized.
   </div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/firestore-client.js"></script>
 <script src="js/randomizer.js"></script>
 <script src="js/scorer.js"></script>
 <script src="js/timer.js"></script>
@@ -91,15 +91,13 @@
 <script src="js/data-loader.js"></script>
 <script src="js/code-runner.js"></script>
 <script src="js/question-renderer.js"></script>
-<script src="js/export.js"></script>
 <script src="js/pdf-report.js"></script>
 <script src="js/integrity.js"></script>
 <script src="js/theme.js"></script>
+<script src="js/open-ended-grader.js"></script>
+<script src="js/submission-sync.js"></script>
 <script src="js/quiz-engine.js"></script>
 <script>
-let lastScoreResult = null;
-let lastMeta = null;
-
 async function startQuiz() {
   const name = document.getElementById('entryName').value.trim();
   const roll = document.getElementById('entryRoll').value.trim();
@@ -143,9 +141,7 @@ async function startQuiz() {
     QuizEngine.setAutoSubmitHandler((result) => {
       IntegrityGuard.disable();
       IntegrityGuard.exitFullscreen();
-      lastScoreResult = result.scoreResult;
-      lastMeta = result.meta;
-      showResults(result.scoreResult, result.meta, true);
+      showResults(result.scoreResult, result.meta, true, result.syncResult);
     });
     state.timer.start();
     enableIntegrityGuards();
@@ -176,17 +172,15 @@ function enableIntegrityGuards() {
   });
 }
 
-function handleViolation(type) {
-  const result = QuizEngine.recordViolation(type);
+async function handleViolation(type) {
+  const result = await QuizEngine.recordViolation(type);
   if (!result) return;
   renderViolationBanner(result);
 
   if (result.triggeredSubmit && result.submitResult) {
     IntegrityGuard.disable();
     IntegrityGuard.exitFullscreen();
-    lastScoreResult = result.submitResult.scoreResult;
-    lastMeta = result.submitResult.meta;
-    showResults(result.submitResult.scoreResult, result.submitResult.meta, true);
+    showResults(result.submitResult.scoreResult, result.submitResult.meta, true, result.submitResult.syncResult);
   }
 }
 
@@ -325,18 +319,19 @@ function confirmSubmit() {
   if (confirm(msg)) finalizeSubmit(false);
 }
 
-function finalizeSubmit(isAuto) {
+async function finalizeSubmit(isAuto) {
   clearSaveTimers();
-  const result = QuizEngine.submitQuiz(isAuto);
+  const submitBtn = document.getElementById('submitBtn');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Submitting…';
+  const result = await QuizEngine.submitQuiz(isAuto);
   if (!result) return;
   IntegrityGuard.disable();
   IntegrityGuard.exitFullscreen();
-  lastScoreResult = result.scoreResult;
-  lastMeta = result.meta;
-  showResults(result.scoreResult, result.meta, isAuto);
+  showResults(result.scoreResult, result.meta, isAuto, result.syncResult);
 }
 
-function showResults(scoreResult, meta, wasAutoSubmitted) {
+function showResults(scoreResult, meta, wasAutoSubmitted, syncResult) {
   document.getElementById('quizScreen').style.display = 'none';
   document.getElementById('resultsScreen').style.display = 'block';
 
@@ -361,27 +356,12 @@ function showResults(scoreResult, meta, wasAutoSubmitted) {
   }
   document.getElementById('resultReviewNote').innerHTML = notes.join('');
 
-  document.getElementById('downloadPdfBtn').style.display = config.generatePdfReport ? 'inline-block' : 'none';
-
-  const breakdown = document.getElementById('resultBreakdown');
-  breakdown.innerHTML = '';
-  scoreResult.perQuestion.forEach((r, i) => {
-    const question = QuizEngine.getState().quiz[i];
-    const row = document.createElement('div');
-    row.className = 'result-row';
-    let statusHtml;
-    if (r.correct === true) statusHtml = '<span class="badge-correct">✓ Correct</span>';
-    else if (r.correct === false) statusHtml = '<span class="badge-incorrect">✗ Incorrect</span>';
-    else statusHtml = '<span class="badge-review">Pending Review</span>';
-    row.innerHTML = `<span>Q${i + 1}. ${question.topic} (${question.type})</span><span>${statusHtml} — ${r.earned}/${r.max}</span>`;
-    breakdown.appendChild(row);
-    if (config.showExplanationsAfterSubmit && question.explanation) {
-      const exp = document.createElement('div');
-      exp.className = 'explanation-box';
-      exp.textContent = question.explanation;
-      breakdown.appendChild(exp);
-    }
-  });
+  const syncEl = document.getElementById('resultSyncStatus');
+  if (!syncResult || syncResult.synced) {
+    syncEl.textContent = '';
+  } else {
+    syncEl.textContent = 'Your result is saved on this device and will finish sending to your instructor automatically next time you have a connection.';
+  }
 }
 
 /**
@@ -406,32 +386,8 @@ function renderGradeBand(percentage, gradeScale, passed) {
   });
 }
 
-function downloadCSV() {
-  if (!lastScoreResult) return;
-  Exporter.exportStudentResultCSV(lastScoreResult, lastMeta);
-}
-function downloadJSON() {
-  if (!lastScoreResult) return;
-  Exporter.exportStudentResultJSON(lastScoreResult, lastMeta);
-}
-
-async function downloadPDF() {
-  if (!lastScoreResult) return;
-  const btn = document.getElementById('downloadPdfBtn');
-  const originalText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Generating PDF…';
-  try {
-    const state = QuizEngine.getState();
-    await PDFReport.generate(lastScoreResult, lastMeta, state.quiz, state.answers, state.config);
-  } catch (e) {
-    alert('Could not generate the PDF report: ' + e.message + '\nYou can still use the CSV/JSON download as a fallback.');
-  }
-  btn.disabled = false;
-  btn.textContent = originalText;
-}
-
 Theme.init();
+SubmissionSync.retryPending();
 </script>
 </body>
 </html>

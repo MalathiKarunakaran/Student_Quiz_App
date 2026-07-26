@@ -2,8 +2,13 @@
   "name": "csa65-quiz-app",
   "version": "1.0.0",
   "private": true,
-  "description": "CSA65 Quiz Management System — static frontend plus Vercel serverless functions for the Hermes Agent (AI question generation).",
+  "description": "CSA65 Quiz Management System — static frontend plus Vercel serverless functions for the Hermes Agent (AI question generation) and the keyword-based descriptive-answer grading engine.",
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "mammoth": "^1.8.0",
+    "pdf-parse": "^1.1.1"
   }
 }

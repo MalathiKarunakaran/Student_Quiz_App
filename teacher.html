@@ -18,6 +18,7 @@
     <div class="eyebrow">CSA65 · Teacher Panel</div>
     <h1>Configure a Quiz</h1>
     <p>Load a question bank, filter it, and generate a shareable student link — no repo changes needed for a quick quiz.</p>
+    <p><a href="dashboard.html">Open Teacher Dashboard →</a> — view submissions, search, review answers, export reports (sign-in required).</p>
   </header>
 
   <div class="card">
@@ -190,6 +191,35 @@
     <div id="linkOutput" style="display:none; margin-top:14px;"></div>
   </div>
 
+  <div class="card" id="keywordBankSection" style="display:none;">
+    <h2>5. Generate Keyword Bank from Syllabus (for AI-Graded Descriptive Answers)</h2>
+    <p style="font-size:13px; color:var(--graphite); margin:0 0 14px;">
+      Upload this unit's syllabus (.docx or .pdf) to extract weighted keywords, concepts, and technical terms for every descriptive/scenario/prompt-engineering/open-ended-debugging question in the loaded bank. Requires signing in as the instructor and this app's Vercel deployment. Re-uploading unchanged syllabus content skips regeneration automatically (no extra AI call).
+    </p>
+
+    <div id="keywordBankAuthGate"></div>
+
+    <div id="keywordBankControls" style="display:none;">
+      <div class="field">
+        <label>Syllabus File (.docx or .pdf)</label>
+        <input type="file" id="syllabusFile" accept=".docx,.pdf">
+      </div>
+      <div class="checkbox-item" style="margin-bottom:10px;">
+        <input type="checkbox" id="forceRegenerate">
+        <label style="margin:0;">Force regenerate even if syllabus content is unchanged</label>
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" id="keywordBankGenerateBtn" onclick="generateKeywordBankFromSyllabus()">Generate Keyword Bank</button>
+        <button class="btn-secondary" onclick="AuthGuard.signOut()">Sign Out</button>
+      </div>
+      <div id="keywordBankStatus" class="ai-generate-status" style="display:none;">
+        <span class="ai-spinner" aria-hidden="true"></span> Extracting syllabus and generating keywords…
+      </div>
+      <div id="keywordBankError"></div>
+      <div id="keywordBankMeta" style="font-size:12.5px; color:var(--graphite); margin-top:8px;"></div>
+    </div>
+  </div>
+
   <div class="card">
     <h2>How This Works</h2>
     <p style="font-size:13.5px; color:var(--graphite); margin:0 0 10px;">
@@ -205,6 +235,10 @@
   </div>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/auth-guard.js"></script>
 <script src="js/data-loader.js"></script>
 <script src="js/theme.js"></script>
 <script src="js/teacher-config.js"></script>
@@ -217,8 +251,31 @@
       document.getElementById('aiGenerateSection').style.display = 'block';
       document.getElementById('configSection').style.display = 'block';
       document.getElementById('generateSection').style.display = 'block';
+      document.getElementById('keywordBankSection').style.display = 'block';
     }
   };
+
+  // Step 5 is the only part of this page that needs sign-in — the rest of
+  // the wizard never touches student data, so it stays fully unauthenticated.
+  function initKeywordBankAuthGate() {
+    const gate = document.getElementById('keywordBankAuthGate');
+    const controls = document.getElementById('keywordBankControls');
+    if (!FirebaseApp.isConfigured()) {
+      gate.innerHTML = '<div class="error-box">Firebase is not configured yet — see docs/firebase-setup.md.</div>';
+      return;
+    }
+    AuthGuard.onAuthChange(user => {
+      if (user) {
+        gate.innerHTML = `<div class="footnote">Signed in as ${user.email}.</div>`;
+        controls.style.display = 'block';
+      } else {
+        controls.style.display = 'none';
+        AuthGuard.renderLoginForm(gate, { title: 'Sign In to Generate a Keyword Bank' });
+      }
+    });
+  }
+  initKeywordBankAuthGate();
+
   Theme.init();
 </script>
 </body>
