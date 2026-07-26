@@ -129,6 +129,19 @@ header.app-header {
 @media (max-width: 640px) {
   .theme-toggle-btn { position: static; display: block; margin-bottom: 10px; width: fit-content; }
 }
+.institution-strip {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+.institution-badge {
+  background: #fff; border-radius: 8px; padding: 5px 10px;
+  display: flex; align-items: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.28);
+}
+.institution-badge img { display: block; height: 32px; width: auto; }
+@media (max-width: 640px) {
+  .institution-badge img { height: 26px; }
+}
 header.app-header .eyebrow {
   font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 1.5px; text-transform: uppercase;
   color: var(--chip-amber); font-weight: 700; margin-bottom: 10px;
