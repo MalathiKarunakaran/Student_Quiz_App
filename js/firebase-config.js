@@ -15,12 +15,12 @@
  */
 
 const FIREBASE_CONFIG = {
-  apiKey: "REPLACE_WITH_YOUR_FIREBASE_API_KEY",
-  authDomain: "REPLACE_WITH_YOUR_PROJECT.firebaseapp.com",
-  projectId: "REPLACE_WITH_YOUR_PROJECT_ID",
-  storageBucket: "REPLACE_WITH_YOUR_PROJECT.appspot.com",
-  messagingSenderId: "REPLACE_WITH_YOUR_SENDER_ID",
-  appId: "REPLACE_WITH_YOUR_APP_ID"
+  apiKey: "AIzaSyDmWtzNn935vgg-mYryF5U78hoY_vEkezU",
+  authDomain: "csa65-quiz-app.firebaseapp.com",
+  projectId: "csa65-quiz-app",
+  storageBucket: "csa65-quiz-app.firebasestorage.app",
+  messagingSenderId: "1056776666580",
+  appId: "1:1056776666580:web:d12c2143275190b8332a41"
 };
 
 /** Single place every other Firebase-dependent module initializes the app from. */
