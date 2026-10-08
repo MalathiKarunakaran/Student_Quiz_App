@@ -1,0 +1,35 @@
+rules_version = '2';
+
+// CSA65 Quiz Management System — Firebase Storage Security Rules
+//
+// NEW IN THIS CHANGE. The storage bucket has been named in
+// js/firebase-config.js since the project was created but was never written
+// to; lib/materialStore.js is its first use, so these rules are its first
+// protection. Deploy them BEFORE the first upload:
+//   firebase deploy --only storage
+// or paste into Firebase console → Storage → Rules. Keep this file as the
+// source of truth, the same way firestore.rules is.
+//
+// DENY EVERYTHING. There is no client path to this bucket at all — not for
+// students, not for signed-in teachers.
+//
+// Why even teachers are denied here: every legitimate access already goes
+// through a serverless function holding a verified teacher token
+// (api/upload-material.js, api/process-material.js), and those use the Admin
+// SDK, which bypasses these rules entirely. Allowing a parallel client-side
+// route would widen the attack surface to protect a path nothing uses.
+// Teacher downloads are served as short-lived signed URLs minted server-side
+// by MaterialStore.getDownloadUrl() — also unaffected by these rules.
+//
+// This answers §10's "can students download assessment material?" with a
+// structural no, rather than with obscurity: uploaded material is the source
+// the answer key is derived from, so it inherits the keyword bank's trust
+// level (server-only), not the question bank's (deliberately public — see the
+// asymmetry note in firestore.rules).
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

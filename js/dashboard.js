@@ -170,6 +170,18 @@ const Dashboard = (() => {
       </div>`;
   }
 
+  /**
+   * "2 of 3" when a quiz allows retakes, "1" when it doesn't, and "1" for every
+   * submission written before attempts existed (which have no attemptNumber at
+   * all — those were one-attempt-only by construction, so reporting 1 is
+   * accurate rather than a guess).
+   */
+  function attemptLabel(s) {
+    const n = s.attemptNumber || 1;
+    const max = s.maxAttempts || 1;
+    return max > 1 ? `${n} of ${max}` : String(n);
+  }
+
   function renderTable() {
     const wrap = document.getElementById('dashTableWrap');
     if (currentSubmissions.length === 0) {
@@ -186,13 +198,14 @@ const Dashboard = (() => {
           <td>${escapeHtml(s.student.name)}</td>
           <td>${escapeHtml(s.quizTitle)}</td>
           <td>${escapeHtml(s.unit)}</td>
+          <td>${attemptLabel(s)}</td>
           <td>${s.totalEarned}/${s.totalMax} (${s.percentage}%)</td>
           <td>${s.violationCount || 0}</td>
           <td>${submittedLabel}</td>
           <td>${escapeHtml(reviewLabel)}</td>
         </tr>`;
       const detailHtml = expandedId === s.id
-        ? `<tr><td colspan="8" style="padding:14px 0 0;">${renderDetail(s)}</td></tr>`
+        ? `<tr><td colspan="9" style="padding:14px 0 0;">${renderDetail(s)}</td></tr>`
         : '';
       return rowHtml + detailHtml;
     }).join('');
@@ -200,7 +213,7 @@ const Dashboard = (() => {
     wrap.innerHTML = `
       <table class="dash-table">
         <thead>
-          <tr><th>Roll No</th><th>Name</th><th>Quiz</th><th>Unit</th><th>Score</th><th>Violations</th><th>Submitted</th><th>Review</th></tr>
+          <tr><th>Roll No</th><th>Name</th><th>Quiz</th><th>Unit</th><th>Attempt</th><th>Score</th><th>Violations</th><th>Submitted</th><th>Review</th></tr>
         </thead>
         <tbody>${rowsHtml}</tbody>
       </table>`;

@@ -1,6 +1,6 @@
 # CSA65 Quiz Management System
 
-A production-ready quiz platform for *Generative AI and Large Language Models* (CSA65). The quiz-taking experience itself is still **fully client-side** and runs on **GitHub Pages** with no exposed API keys. Two backends now sit alongside it, both opt-in and both degrading gracefully when absent: **Vercel serverless functions** (question generation + keyword-bank generation, both Gemini-backed) and **Firebase** (Firestore + Authentication, for persistent submission storage and the teacher dashboard). See Section 27 for the full picture and `docs/firebase-setup.md` for one-time setup.
+A production-ready quiz platform for *Generative AI and Large Language Models* (CSA65). The quiz-taking experience itself is still **fully client-side** and runs on **GitHub Pages** with no exposed API keys — and since Section 29 it also **works offline and installs to a home screen**, so an unreliable campus connection no longer costs a student their attempt. Two backends now sit alongside it, both opt-in and both degrading gracefully when absent: **Vercel serverless functions** (question generation + keyword-bank generation, both Gemini-backed) and **Firebase** (Firestore + Authentication, for persistent submission storage and the teacher dashboard). See Section 27 for the full picture and `docs/firebase-setup.md` for one-time setup.
 
 ---
 
@@ -25,6 +25,11 @@ Browser (student/teacher)
  │  data/*.json  (question banks, configs,      │
  │                 optional roster)              │
  └─────────────────────────────────────────────┘
+        ▲
+        │  sw.js (Service Worker, Section 29)
+        │  network-first, cache as fallback —
+        │  the whole app keeps working offline
+        └──────────────────────────────────────
 ```
 
 **Why vanilla JS instead of React:** this app has no build step, no `npm install`, and no bundler — you can edit a `.js` file directly in the GitHub web UI and it works immediately on the next page load. For a non-technical instructor maintaining this across multiple semesters, that is a significant advantage over a React/webpack pipeline, which would require a build step before every deploy. React was intentionally NOT used for this reason (per the task's "if justified" condition).
@@ -38,6 +43,9 @@ csa65-quiz-app/
 ├── index.html                    Landing page (role picker)
 ├── teacher.html                  Teacher configuration panel
 ├── student.html                  Student quiz-taking interface
+├── offline.html                  Fallback page shown offline for an uncached URL (Section 29)
+├── sw.js                         Service Worker — offline caching (Section 29)
+├── manifest.webmanifest          Web App Manifest — installable to a home screen (Section 29)
 ├── css/
 │   └── style.css                 Shared responsive styles
 ├── js/
@@ -58,6 +66,7 @@ csa65-quiz-app/
 │   ├── firestore-client.js       Firestore client SDK wrapper (submissions read/write)
 │   ├── open-ended-grader.js      Calls the server keyword-bank grader, falls back to local scoring
 │   ├── submission-sync.js        Persists each submission to Firestore, retries on failure
+│   ├── sw-register.js            Registers sw.js; "offline ready" / "update available" prompts
 │   └── dashboard.js              Drives dashboard.html
 ├── dashboard.html                 Teacher/Admin submissions dashboard (Firebase Auth-gated)
 ├── data/
@@ -68,8 +77,13 @@ csa65-quiz-app/
 │   ├── generate-questions.js      Vercel function — Hermes Agent question generation
 │   ├── generate-keywords.js       Vercel function — teacher-only keyword-bank generation
 │   └── grade-open-ended.js        Vercel function — server-side keyword-bank grading (no auth, called by students)
+├── assets/
+│   ├── img/                       Institution logos
+│   └── icons/                     PWA / favicon icon set (Section 29)
 ├── lib/                           Server-side modules used only by api/ (see Section 17 & 27)
 ├── firestore.rules                Firestore security rules (paste into console, see docs/firebase-setup.md)
+├── tests/
+│   └── offline-support.test.js    Optional: real-browser checks for Section 29 (Playwright)
 └── docs/
     ├── README.md                  This file
     └── firebase-setup.md          One-time Firebase project setup steps
@@ -203,10 +217,23 @@ csa65-quiz-app/
 { "students": [ { "rollNo": "21CS001", "name": "Student One" } ] }
 ```
 
-### 5.4 Firestore `submissions/{quizId}__{rollNo}` (Section 27)
+### 5.4 Firestore `submissions/{quizId}__{rollNo}` — attempt 1; `…__a{n}` for attempt *n* (Section 27)
+
+**Document id and attempts.** Attempt 1 lives at `{quizId}__{rollNo}`, with no suffix — exactly the
+id used before attempts existed, so nothing already in Firestore needs migrating and the default
+one-attempt behaviour is unchanged. Attempt *n* > 1 lives at `{quizId}__{rollNo}__a{n}`, and only
+exists where a teacher raised `max_attempts` on the assessment. `firestore.rules` binds the id to
+`attemptNumber` in both directions, so a student cannot park a resubmission at an id of their own
+choosing.
+
 ```jsonc
 {
   "quizId": "...", "unit": "I", "quizTitle": "...", "topics": ["Tokenization", "..."],
+  // §6 identity, alongside the legacy quizId/unit rather than replacing them.
+  // null for a quiz opened the legacy way (?config= / ?configFile=), which has
+  // no registry entry behind it.
+  "assessment_id": "csa65-u1-quiz1", "subject_id": "csa65", "unit_id": "csa65-u1",
+  "attempt_id": "csa65-unit1-quiz1__22CS001", "attemptNumber": 1, "maxAttempts": 1,
   "student": { "name": "...", "rollNo": "..." },
   "questionSnapshot": [ /* full question objects, same shape as Section 5.1 */ ],
   "answers": { "u1-mcq-001": 1, "u1-descriptive-004": "..." },
@@ -218,19 +245,53 @@ csa65-quiz-app/
 }
 ```
 
-### 5.5 Firestore `keywordBanks/{unit}` (Section 17/27 — never readable/writable by any client, admin-SDK only)
+### 5.5 Firestore `keywordBanks/{assessment_id}` (Section 17/27 — never readable/writable by any client, admin-SDK only)
+
+Keyed by `assessment_id`. It was keyed by the bare unit (`keywordBanks/I`), which meant two
+subjects that both had a "Unit I" shared one rubric and the second one generated silently
+overwrote the first — see `docs/AUDIT.md` section H item 4. Documents under the old key are
+still read as a fallback by `api/grade-open-ended.js`, so banks generated before the change
+keep grading until they are regenerated; no data migration is required.
+
 ```jsonc
 {
-  "unit": "I", "sourceContentHash": "sha256...", "generatedAt": "<server timestamp>", "generatedBy": "...", "model": "gemini-2.0-flash",
+  "schemaVersion": 2,
+  "assessment_id": "csa65-u1-quiz1", "subject_id": "csa65", "unit_id": "csa65-u1",
+  "unit": "I", "unitTitle": "Fundamentals of Generative AI and LLMs",
+  "sourceContentHash": "sha256...", "sourceRef": { "kind": "material", "material_id": "..." },
+  "generatedAt": "<server timestamp>", "generatedBy": "...", "model": "gemini-2.0-flash",
   "entries": {
     "u1-descriptive-004": {
       "topic": "Tokenization", "questionText": "...",
-      "keywords": [ { "term":"byte-pair encoding", "category":"concept", "weight":3, "synonyms":["BPE","byte pair encoding"] } ],
-      "totalWeight": 12, "targetWeightForFullMarks": 9, "minKeywordsForFullMarks": 3
+      "keywords": [
+        { "term":"tokenization", "category":"learning-objective", "weight":4, "required":true, "synonyms":["tokenisation","tokenizing"] },
+        { "term":"byte-pair encoding", "category":"concept", "weight":3, "required":false, "synonyms":["BPE","byte pair encoding"] }
+      ],
+      "totalWeight": 12, "targetWeightForFullMarks": 9, "minKeywordsForFullMarks": 3, "requiredCount": 1
     }
   }
 }
 ```
+
+**`required` vs `optional` concepts.** Weight alone could not express "this must be present": a
+weight-4 `learning-objective` could be skipped entirely and still reach full marks if enough
+weight-1 and weight-2 terms compensated. `required` is the separate axis that closes that. At
+grading time the weighted ratio decides the mark and the fraction of required concepts present
+**caps** it, so naming extra optional terms can never substitute for a missing required one.
+`lib/keywordBankValidator.js` allows at most half an entry's keywords to be required (demoting
+the lightest excess and reporting a warning), because "mark everything important" is a known
+failure mode of asking an LLM to rank.
+
+A bank generated before this existed has no `required` field anywhere, so it has zero required
+concepts and scores exactly as it did before — `lib/keywordMatcher.js` honours only an explicit
+`required: true` and never infers it from the category at grading time. Regenerating a bank is
+what opts an assessment into the stricter rubric. `schemaVersion` distinguishes the two, and a
+v1 document is rebuilt even when its source text is unchanged.
+
+**Returned per answer**, on top of the existing fields: `coveragePercent` (earned ÷ **total**
+weight — "how much of the rubric did this answer cover", which is deliberately not the same
+question as "did it earn full marks", since `targetWeightForFullMarks` is ~60% of total weight),
+`requiredCoveragePercent` (`null` for a legacy bank) and `keywordsMissingRequired`.
 
 ---
 
@@ -292,7 +353,7 @@ Both modes also optionally shuffle each MCQ/multiselect question's **option orde
 | Multi-Select | **Proportional**: `max(0, correctSelected − incorrectSelected) / totalCorrect × marks` — rewards partial knowledge, penalizes wild guessing |
 | Fill-in-the-Blank, Code Output | Case-insensitive (configurable) match against a list of acceptable answers |
 | Debugging | Same as Fill-Blank if `acceptableAnswers` provided; otherwise treated as open-ended |
-| Descriptive, Scenario, Prompt Engineering | **Weighted keyword-bank scoring when available** (Section 17/27): `js/open-ended-grader.js` sends the answer to `/api/grade-open-ended`, which scores it server-side against a teacher-generated, weighted, synonym-aware keyword bank (`lib/keywordMatcher.js`) and returns matched/missing keywords + feedback + a suggested improvement. **Falls back automatically** to the original plain-keyword `scoreOpenEnded()` in `scorer.js` (counts tagged `keywords[]` present in the answer, scaled against `minKeywordsForFullMarks`) whenever no bank has been generated for that unit, or the Vercel deployment isn't reachable (e.g. plain GitHub Pages). Always flagged `needsReview: true` either way — **this remains keyword-based, not full semantic understanding** (see Section 18) |
+| Descriptive, Scenario, Prompt Engineering | **Weighted keyword-bank scoring when available** (Section 17/27): `js/open-ended-grader.js` sends the answer to `/api/grade-open-ended`, which scores it server-side against a teacher-generated, weighted, synonym-aware keyword bank (`lib/keywordMatcher.js`) and returns matched/missing keywords + feedback + a suggested improvement. **Falls back automatically** to the original plain-keyword `scoreOpenEnded()` in `scorer.js` (counts tagged `keywords[]` present in the answer, scaled against `minKeywordsForFullMarks`) whenever no bank has been generated for that assessment, or the Vercel deployment isn't reachable (e.g. plain GitHub Pages). Always flagged `needsReview: true` either way — **this remains keyword-based, not full semantic understanding** (see Section 18) |
 
 **Negative marking** (optional, `config.negativeMarking`, Section 5.2): when enabled, deducts `penaltyFraction × marks` from a WRONG answer on MCQ / True-False / Fill-Blank / Code Output. Not applied to Multi-Select (already proportional) or open-ended types (never definitively "wrong"). The quiz total is floored at 0 overall.
 
@@ -323,7 +384,7 @@ Both modes also optionally shuffle each MCQ/multiselect question's **option orde
 4. **Generate** — either:
    - **Shareable link** (recommended): the entire config is base64-encoded directly into the URL query string. Zero repo commits needed — copy the link, send it to students, done.
    - **Download config JSON**: for instructors who prefer to commit a permanent config file to the repo (e.g. `data/config-unit1-final.json`) for long-term recordkeeping.
-5. **Generate Keyword Bank from Syllabus** (Section 17/27) — the only part of `teacher.html` that requires signing in. Upload a `.docx`/`.pdf` syllabus for the selected unit; a Vercel function extracts its text, hashes it, skips re-generation if unchanged, and otherwise asks Gemini to produce a weighted keyword bank for every descriptive/scenario/prompt-engineering/open-debugging question, storing it in Firestore for `open-ended-grader.js` to use automatically on future submissions.
+5. **Generate Keyword Bank from Syllabus** (Section 17/27) — the only part of `teacher.html` that requires signing in. Pick the **assessment** the rubric belongs to (or the legacy unit-wide option, which every assessment on that unit falls back to when it has none of its own), then optionally upload a `.docx`/`.pdf` syllabus. The file is optional when the chosen assessment's unit already has stored material or a committed syllabus path — the text extracted at upload is reused rather than asking for the same document twice. A Vercel function hashes the source text, skips re-generation if unchanged, and otherwise asks Gemini to produce a weighted keyword bank (with `required`/`optional` concept flags) for every descriptive/scenario/prompt-engineering/open-debugging question, storing it in Firestore for `open-ended-grader.js` to use automatically on future submissions.
 
 Steps 1-4 never touch student data and remain fully unauthenticated, exactly as before — only Step 5 requires sign-in.
 
@@ -349,6 +410,12 @@ Steps 1-4 never touch student data and remain fully unauthenticated, exactly as 
 6. Share `https://<your-username>.github.io/csa65-quiz-app/` with students for the landing page, or go through `teacher.html` to generate a direct quiz link.
 
 No build step, no `npm install`, no server configuration required — it is a fully static site.
+
+**Offline support needs nothing extra here**, but two deployment details matter (Section 29):
+- GitHub Pages serves over **HTTPS**, which is what makes the Service Worker register at all — it is skipped on plain `http://` and on `file://`.
+- `sw.js` and `manifest.webmanifest` must stay at the **repository root**, beside `index.html`. A worker's scope is its own directory, so a `sw.js` moved into `js/` would only control `/js/*` and would silently stop caching the app. Every path inside both files is relative, so the subpath that GitHub Pages serves from (`/<repo-name>/`) needs no configuration — **verified in a browser under both a subpath and a domain root**.
+
+**Tell students to open the link once while on Wi-Fi before quiz day.** Nothing is cached until that first visit completes.
 
 ---
 
@@ -383,7 +450,7 @@ On the frontend, `teacher.html`'s "Generate Questions with AI (Hermes Agent)" ca
 
 **This only works on the Vercel-hosted deployment** (the serverless function needs a server to run and a place to hold the Gemini API key). On GitHub Pages, the same "Generate with AI" button shows a clear message instead of failing silently, and the rest of the app — loading the static bank, filtering, configuring, sharing a link, taking a quiz — is completely unaffected.
 
-**Keyword-bank generation (implemented, Section 27):** a second, related pipeline — `api/generate-keywords.js` → `lib/keywordBankBuilder.js` → `lib/keywordPromptBuilder.js` → `lib/llmService.js`'s `callGemini()` (reused, not duplicated) → `lib/keywordBankValidator.js` — extracts weighted keywords/synonyms/concepts/learning-objectives per descriptive/scenario/prompt-engineering/open-debugging question from a teacher-uploaded syllabus (`lib/documentTextExtractor.js`, via `mammoth`/`pdf-parse`), and stores the result in Firestore (`keywordBanks/{unit}`, Section 5.5) via `lib/firebaseAdmin.js`. Teacher-only, gated by a Firebase ID token checked against `TEACHER_EMAILS`. Regeneration is skipped automatically when the syllabus's extracted-text hash is unchanged (`sourceContentHash`, computed with Node's built-in `crypto`, no extra dependency).
+**Keyword-bank generation (implemented, Section 27):** a second, related pipeline — `api/generate-keywords.js` → `lib/keywordBankBuilder.js` → `lib/keywordPromptBuilder.js` → `lib/llmService.js`'s `callGemini()` (reused, not duplicated) → `lib/keywordBankValidator.js` — extracts weighted keywords/synonyms/concepts/learning-objectives per descriptive/scenario/prompt-engineering/open-debugging question from a teacher-uploaded syllabus (`lib/documentTextExtractor.js`, via `mammoth`/`pdf-parse`), and stores the result in Firestore (`keywordBanks/{assessment_id}`, Section 5.5) via `lib/firebaseAdmin.js`. Teacher-only, gated by a Firebase ID token checked against `TEACHER_EMAILS`. Regeneration is skipped automatically when the syllabus's extracted-text hash is unchanged (`sourceContentHash`, computed with Node's built-in `crypto`, no extra dependency).
 
 **AI-assisted grading of open-ended answers (implemented, deliberately NOT an LLM call per answer):** `api/grade-open-ended.js` scores each descriptive/scenario/prompt-engineering answer against the keyword bank above using `lib/keywordMatcher.js` — a plain, deterministic, weighted word-boundary + synonym matcher (no LLM call at grading time, by design: no added cost/latency per submission, and the weighted "answer key" itself never has to be sent to a student's browser to be graded). `js/open-ended-grader.js` calls this endpoint and falls back to the original local `scorer.js scoreOpenEnded()` on any failure — see Section 9.
 
@@ -407,6 +474,8 @@ Tested logic against (via the ES2017+ features used — arrow functions, templat
 - Older browsers without `window.crypto.getRandomValues` automatically fall back to `Math.random()` for true-random mode (seeded mode is unaffected, as it doesn't use crypto).
 - Mobile Safari / Chrome Android — fully supported via the responsive CSS (Section 4).
 - Internet Explorer is **not** supported (uses arrow functions, template literals, and `fetch` with no polyfill included).
+- **Offline support (Section 29)** needs a Service Worker, which requires a *secure context*: it works on `https://` and on `localhost`, and is silently skipped on `file://` and plain `http://`. Supported by Chrome/Edge 45+, Firefox 44+ and Safari 11.1+ — i.e. everything in the list above. Where it's unavailable the app runs exactly as it did before, just without offline caching: `js/sw-register.js` returns early and nothing else changes.
+- **Installing to a home screen** works on Chrome/Edge (desktop + Android) and on iOS Safari via *Share → Add to Home Screen*. iOS ignores the manifest's `shortcuts`, so the quiz/instructor shortcuts are an Android/desktop nicety only.
 
 ---
 
@@ -427,6 +496,31 @@ Executed and verified during development (not just claimed — actually run):
 - [x] **Bug found and fixed during real-browser testing:** `teacher-config.js`'s shareable-link generator embedded the raw base64 config in the URL query string unescaped. Base64 can contain `+` and `/`, and a browser's `URLSearchParams` silently decodes a literal `+` in a query value to a space — this corrupts the config on roughly 9 in 10 realistically-sized links (confirmed by reproducing it live: a student opening an affected link saw "Could not parse the 'config' URL parameter — the link may be corrupted"). This is a browser-only bug — Node's isolated `atob`/`btoa` round-trip tests never exercise real URL query-string parsing, so it was invisible until tested in an actual browser. Fixed by `encodeURIComponent`-ing the base64 string when building the link.
 - [x] **Bug found and fixed during real-browser testing:** `.btn-secondary:disabled` (the Previous/Next buttons) had no CSS rule, so a disabled button on Q1 (Previous) or the last question (Next) looked fully clickable — full opacity, `cursor: pointer`, same colors as enabled — even though the native `disabled` attribute silently blocked the click. Only visible by actually rendering the page; invisible to any Node-based test. Fixed by adding a `.btn-secondary:disabled` rule.
 
+### Offline support (Section 29) — real-browser testing, Playwright + Chromium
+
+**37 automated browser checks, all passing**, run in two deployment shapes: at a domain root, and under the GitHub Pages subpath `/Student_Quiz_App/`. They live in `tests/offline-support.test.js` and are re-runnable:
+
+```bash
+cd csa65-quiz-app
+npm install --no-save playwright && npx playwright install chromium   # one time
+node tests/offline-support.test.js
+```
+
+This is **optional developer tooling only** — the app itself still has no build step and no dependencies, and nothing in `tests/` is needed to edit, deploy or run it. The script starts and stops its own static servers, so nothing has to be running first.
+
+- [x] Worker registers, activates, and precaches 39 entries; scope is correct in **both** deployment shapes (a root-scoped worker would have silently failed on GitHub Pages).
+- [x] With the network cut: `index.html` and `student.html` load and style correctly, the question bank and config load from cache, a full 15-question attempt scores, and the result is written to `localStorage`.
+- [x] An offline submission is **queued, not lost** — a `csa65pendingsync::` record is written for retry.
+- [x] A shareable `student.html?config=…` link resolves offline via `ignoreSearch`.
+- [x] An uncached URL opened offline falls back to `offline.html`.
+- [x] **No staleness:** a question bank edited on disk while online is served fresh, not from cache — the GitHub-UI-edit property of Section 1 is preserved. Verified by editing the file mid-test and reading back the edit.
+- [x] `teacher.html` and `dashboard.html` still load, render and gate correctly with the worker active; no uncaught errors on any page.
+- [x] **Bug found and fixed during real-browser testing:** `sw.js` calls `clients.claim()` so the very first visit becomes offline-capable without a reload — but `clients.claim()` *also* fires `controllerchange`, and `js/sw-register.js` reloaded on any such event. The result: every first-ever visit silently reloaded itself a second or two in, wiping whatever the student had already typed into the entry form. Invisible to any Node-based test, since it only exists in the real worker lifecycle. Fixed with an `acceptedUpdate` guard so only a user-accepted update ever reloads, and pinned by a regression check that types into the field, waits out the claim, and asserts the text survived.
+- [x] **Bug found and fixed during real-browser testing:** precaching the Firebase SDK (so an offline-started attempt can still sync if the connection returns before submit) had the side effect of making `firebase` *defined* while offline — where previously the CDN script simply failed to load and the Firestore write threw immediately. A Firestore write resolves only on server acknowledgement, so with no connection its promise **never settles at all**: `QuizEngine.submitQuiz()` awaits `SubmissionSync.sync()`, so a student submitting offline would click Submit and never see their results screen. Confirmed live (8 s+, no resolution, no rejection). Fixed in `js/submission-sync.js` with a `navigator.onLine` fast path plus an 8 s `withTimeout()` bound on both `sync()` and `retryPending()`. This also closes the same hazard on a flaky-but-"online" connection, which existed before offline support did.
+- [x] **Bug found and fixed during real-browser testing:** `offline.html` reloaded itself whenever `navigator.onLine` was true, including on first render — an infinite loop, because the file exists on the server, so reloading while online just serves it again. The page never settled. Fixed so only the `online` *event* retries.
+- [x] **Bug found and fixed during real-browser testing:** that same auto-retry then overrode a navigation the student had already started — an `online` event arriving while a tapped quiz link was in flight threw away the page they had asked for and dumped them on the home page. Reproduced live. Fixed with a `pagehide` guard plus a short delay, so a user-initiated navigation always wins.
+- [x] **Dark-mode fix found by screenshot:** the toast used `--console` (#0B0C10) as its background, which sits almost exactly on top of dark mode's `--paper` (#101116) — the toast all but disappeared, leaving a faint border. It read correctly in light mode, so only rendering both themes caught it. Fixed with dedicated `--toast-*` tokens that lift the toast above the page in dark mode instead of sinking it below.
+
 ---
 
 ## 21. Suggested Enhancements (Not Yet Built)
@@ -434,7 +528,7 @@ Executed and verified during development (not just claimed — actually run):
 - **Leaderboard:** would require a shared data store (e.g., a free Google Sheet + Apps Script endpoint, or Firebase free tier) since this app currently has no way for one student's browser to see another's results — a meaningful architecture change, not a small add-on.
 - **Analytics dashboard:** collect instructor-side by having students email/upload their downloaded JSON results, then a small script (could be a future `analytics.html` reading multiple uploaded JSON files via `<input type="file" multiple>`) aggregates class-wide topic/Bloom-level performance.
 - **CSV export:** already implemented (Section 9, `export.js`).
-- **Offline support:** add a Service Worker + Web App Manifest to cache `data/*.json` and all app files, enabling the quiz to be taken with an intermittent connection after first load — recommended as a near-term enhancement given many student devices have unreliable Wi-Fi.
+- **Offline support:** already implemented (Section 29, `sw.js`).
 - **PDF/lecture-note-to-question-bank AI tool:** see Section 17.
 
 ---
@@ -507,15 +601,47 @@ A toggle button (top-right of the header on all three pages) switches between li
 
 **Before this feature:** every student result lived only in `localStorage` (`js/storage.js`, keys `csa65result::{quizId}::{rollNo}`), per browser/device, and reached the instructor only if the student manually downloaded and sent a CSV/JSON/PDF file. There was no way for one browser to see another's data.
 
-**Now:** `QuizEngine.submitQuiz()` (`js/quiz-engine.js`) still writes to `localStorage` first, exactly as before (unchanged — this remains the resume/offline fallback), and then calls `SubmissionSync.sync()` to write the full submission (Section 5.4) directly to Firestore via the client SDK, from the student's unauthenticated browser. This is a public `create`-only write path — Firestore Security Rules (`firestore.rules`) validate the document's shape and gross mark bounds before accepting it, and deny all `read`/`update`/`delete` to anyone but the signed-in teacher. The document ID is deterministic (`{quizId}__{rollNo}`), mirroring the existing single-attempt `localStorage` key scheme — a resubmission for the same quiz+student naturally fails as `ALREADY_EXISTS` rather than needing extra rule logic.
+**Now:** `QuizEngine.submitQuiz()` (`js/quiz-engine.js`) still writes to `localStorage` first, exactly as before (unchanged — this remains the resume/offline fallback), and then calls `SubmissionSync.sync()` to write the full submission (Section 5.4) directly to Firestore via the client SDK, from the student's unauthenticated browser. This is a public `create`-only write path — Firestore Security Rules (`firestore.rules`) validate the document's shape and gross mark bounds before accepting it, and deny all `read`/`update`/`delete` to anyone but the signed-in teacher. The document ID is deterministic (`{quizId}__{rollNo}` for attempt 1), mirroring the existing `localStorage` key scheme — a resubmission for the same quiz+student+attempt lands on an existing document, which Firestore evaluates as an `update` and the rules allow only for the teacher, so it is refused with no extra rule logic.
+
+**Attempts (§6).** `max_attempts` on the assessment decides how many attempts a student may file; it
+defaults to **1**, so a quiz that says nothing about attempts behaves exactly as it always has.
+Because students cannot read `submissions` at all, the client cannot look up how many attempts it
+has already used — it *writes* to find out, trying attempt 1, then 2, up to the limit, and stopping
+at the first slot that accepts. With the default of 1 that is a single write, as before.
+
+Two details that are easy to get wrong and are covered by `tests/attempt-identity.test.js`:
+
+- **A refused write is terminal, not retryable.** A blocked resubmission surfaces as
+  `permission-denied` (the web SDK has no `create()`, so an overwrite is always a refused *update*;
+  `already-exists` never occurs). Treating it as a transient failure is what left a re-taken quiz
+  queued in `localStorage` and retried on every page load forever — fixed, see Section 20.
+- **A queued submission replays into the slot it was assigned, never a freshly searched one.**
+  `withTimeout()` deliberately does not cancel the underlying write, so it can still land after the
+  client gave up; a replay that searched for a free slot would then file a *second* attempt for a
+  student who sat the quiz once.
+
+Server-side enforcement of the cap: for attempt 1 there is nothing to check, so no extra read is
+incurred. For attempt *n* > 1 the rules read `assessments/{assessment_id}.max_attempts` directly, so
+the limit is not client-trusted. If that document does not exist the write is denied — which means
+**multiple attempts require the registry mirrored into Firestore (`assessments/*`), not just sitting
+in `data/assessments.json`**. That is deliberately the safe default: an extra attempt is allowed
+only where a live assessment record says so.
+
+**Known limitation, stated plainly:** the cap is enforced at *submit* time, not at start time. A
+student who re-opens a one-attempt quiz can sit it again and is only told at submission that it will
+not be recorded (the results screen says so explicitly rather than claiming it will sync later).
+Blocking the *start* needs a server-issued attempt token, which belongs with the other server-side
+work in `docs/AUDIT.md` section G and is not yet built.
 
 **Honest limitation** (same posture as `js/integrity.js`'s own disclosed limitations, Section 24): the rules validate *shape and gross bounds*, not that every individual `perQuestion[i].earned` is truly consistent with the corresponding answer — `rules_version = '2'` cannot loop over list elements. A determined client could still hand-craft a structurally valid but fabricated result. Closing that gap fully would require a Cloud Functions trigger to re-score server-side, which forces Firebase's paid Blaze plan — deliberately out of scope; see the comment block at the top of `firestore.rules`.
 
-**Retry behavior:** there's no service worker in this static app, so a failed Firestore write (e.g. no connection at the exact moment of submission) can only be retried on a later page load, not truly in the background. `SubmissionSync` keeps the failed document in `localStorage` under a `csa65pendingsync::` key and flushes it via `retryPending()`, called once when `student.html` loads.
+**Retry behavior:** a failed Firestore write (e.g. no connection at the exact moment of submission) is retried on a later page load rather than in the background. `SubmissionSync` keeps the failed document in `localStorage` under a `csa65pendingsync::` key and flushes it via `retryPending()`, called once when `student.html` loads. There *is* now a service worker (Section 29), but background replay would additionally need the Background Sync API, which Safari/iOS does not implement — so a retry-on-next-open was kept, because it behaves identically on every student device.
+
+**Submission never blocks on the network.** A Firestore write resolves only on server acknowledgement, so with no connection its promise never settles at all. Since `QuizEngine.submitQuiz()` awaits `SubmissionSync.sync()`, an unbounded wait would mean a student submitting offline never sees their results screen. `sync()` therefore short-circuits when `navigator.onLine` is false and, because being "online" proves nothing about reachability, also bounds the attempt with an 8-second timeout. Either path queues the document for retry instead of waiting. See Section 20 for how this was found.
 
 **Why Firebase config values are safe to commit** (`js/firebase-config.js`): a Firebase Web SDK config (`apiKey`, `authDomain`, `projectId`, etc.) is not a secret by design — anyone can already see it by opening DevTools on any Firebase web app. The actual security boundary is `firestore.rules`, enforced server-side by Google, not the secrecy of these values.
 
-**Keyword bank storage** (`keywordBanks/{unit}`, Section 5.5) is the opposite trust model: **never** readable or writable by any client (`allow read, write: if false` in `firestore.rules`) — both generation (`api/generate-keywords.js`) and grading-time reads (`api/grade-open-ended.js`) go through the Firebase Admin SDK (`lib/firebaseAdmin.js`), which bypasses client rules entirely. This is deliberate: the keyword bank is effectively the weighted "answer key" for descriptive questions, and unlike a plain MCQ `correctAnswer` index (already disclosed as visible-in-principle, Section 18), a weighted keyword/synonym checklist is directly and precisely gameable if exposed.
+**Keyword bank storage** (`keywordBanks/{assessment_id}`, Section 5.5) is the opposite trust model: **never** readable or writable by any client (`allow read, write: if false` in `firestore.rules`) — both generation (`api/generate-keywords.js`) and grading-time reads (`api/grade-open-ended.js`) go through the Firebase Admin SDK (`lib/firebaseAdmin.js`), which bypasses client rules entirely. This is deliberate: the keyword bank is effectively the weighted "answer key" for descriptive questions, and unlike a plain MCQ `correctAnswer` index (already disclosed as visible-in-principle, Section 18), a weighted keyword/synonym checklist is directly and precisely gameable if exposed.
 
 **One-time setup required** (cannot be automated from this codebase — needs Firebase console + Vercel dashboard access): see `docs/firebase-setup.md` for creating the project, enabling Firestore + Authentication, creating the one teacher account, pasting in `firestore.rules`, and setting the new environment variables (`FIREBASE_SERVICE_ACCOUNT_BASE64`, `TEACHER_EMAILS`, alongside the existing `GEMINI_API_KEY`). Until that's done, `FirebaseApp.isConfigured()` returns `false` and every Firebase-dependent feature degrades to a clear "not configured yet" message instead of throwing — the rest of the app (quiz-taking, MCQ scoring, teacher config Steps 1-4) is completely unaffected.
 
@@ -532,4 +658,50 @@ A new, Firebase-Auth-gated page — nothing renders until the instructor signs i
 
 `teacher.html`'s existing 4-step quiz-configuration wizard is untouched and still requires no sign-in at all — only its new Step 5 (keyword-bank generation, Section 17/27) and this dashboard require authentication, since those are the only parts that touch student answers or cost a Gemini call.
 
-**Assessment repository:** requirement item 6 (question paper / answer key / responses / evaluation / analytics / reports, all in one place) is satisfied by the combination already described above rather than a separate duplicate store: `submissions/*` holds the question-paper snapshot + student responses + evaluation together per attempt, `keywordBanks/{unit}` is the generated "answer key" for descriptive questions, and this dashboard is the analytics/reporting surface over both — no additional collection was introduced to avoid duplicating data that's already queryable here.
+**Assessment repository:** requirement item 6 (question paper / answer key / responses / evaluation / analytics / reports, all in one place) is satisfied by the combination already described above rather than a separate duplicate store: `submissions/*` holds the question-paper snapshot + student responses + evaluation together per attempt, `keywordBanks/{assessment_id}` is the generated "answer key" for descriptive questions, and this dashboard is the analytics/reporting surface over both — no additional collection was introduced to avoid duplicating data that's already queryable here.
+
+---
+
+## 29. Offline Support — Service Worker + Installable App (`sw.js`, `manifest.webmanifest`, `js/sw-register.js`)
+
+Many students take these quizzes on phones and laptops with unreliable campus Wi-Fi. Before this, a dropped connection mid-quiz meant a blank page on any reload: the answers were safe in `localStorage` (Section 11), but *the app itself* was gone. Now, after one online visit, the whole app — all four pages, the stylesheet, every JS module, the question banks and the logos — is stored on the device, and a quiz can be started, taken, scored and submitted with the network completely off.
+
+### Caching strategy, and the constraint that drove it
+
+Section 1 defends a specific property of this codebase: the instructor can edit a `.js` or `data/*.json` file **directly in the GitHub web UI** and it takes effect on the next page load, with no build step. A conventional cache-first service worker silently destroys that — the instructor edits a question bank, reloads, and sees the old one with no visible cause. So:
+
+| Request | Strategy | Why |
+|---|---|---|
+| Same-origin (HTML, CSS, JS, `data/*.json`, images) | **Network-first**, 4 s timeout → cache | Online, the live file always wins, so the GitHub-UI-edit property survives intact and no student ever sees a stale question bank. Offline, the precached copy keeps the quiz running. On a stalling connection the cached copy is served after 4 s so a *timed* quiz isn't frozen by a hanging request — while the real response still completes in the background and refreshes the cache. |
+| Version-pinned CDN assets (Firebase SDK, Pyodide, jsPDF, Google Fonts) | **Cache-first** | Every URL pins an exact version (`firebasejs/10.13.2/…`, `pyodide/v0.26.4/…`), so a cached copy can never go stale. Re-downloading Pyodide (tens of MB) per run would be far worse than a staleness risk that is zero. |
+| `/api/*` | **Not intercepted** | Serverless, always needs the network, and is POST anyway. |
+| `firestore.googleapis.com` | **Not intercepted** | The Firestore SDK runs its own connection and retry logic; a worker in front of it would only interfere. |
+
+Only `GET` is ever intercepted, so no submission or API call is replayed from cache.
+
+### What a student actually gets offline
+
+- Any page they've opened before, including a **shareable `?config=…` link** — each of those is a unique URL that can't be precached, so the worker matches them to the one cached `student.html` with `ignoreSearch` (the config is parsed from `window.location` by the page itself, never by a server).
+- A full attempt: question bank, randomization, all 9 question types, the timer, scoring and the results screen.
+- An un-cached URL opened offline falls back to **`offline.html`**, which retries by itself the moment a connection returns.
+- The Pyodide "Run Code" sandbox (Section 23) and PDF reports (Section 25) work offline only if the student used them at least once while online; otherwise they fail gracefully exactly as they already did.
+
+### Installable to a home screen
+
+`manifest.webmanifest` plus the icon set in `assets/icons/` makes the app installable (standalone window, home-screen icon, "Take a quiz"/"Configure a quiz" shortcuts). All manifest paths are relative, so this works unchanged both at a domain root (Vercel) and in the GitHub Pages subpath `/Student_Quiz_App/` — **verified in a real browser under both shapes**.
+
+### Updates are offered, never forced
+
+`sw.js` deliberately does **not** call `skipWaiting()`. A new version waits until every tab closes, or until the student accepts the prompt in `js/sw-register.js` — and `student.html` suppresses that prompt entirely while a quiz is on screen (`canPrompt`), because accepting it reloads the page and would end a timed attempt.
+
+### Maintenance
+
+`PRECACHE_URLS` in `sw.js` is a hand-written list, since there's no build step to generate one. **When you add a new `.js`, `.json`, `.html` or image file that the app needs offline, add it to that list and bump `CACHE_VERSION`.** Bumping the version is what makes browsers install the new worker and re-precache; `activate` then deletes every older `csa65-*` cache.
+
+### Honest limitations
+
+- **Retries are still page-load-triggered, not background-triggered.** Replaying a queued submission from the worker would need the Background Sync API, which Safari/iOS does not implement — and iOS is a large share of the student devices this has to work on. A retry on next open behaves identically on every browser, which is worth more here than a background retry that silently works on only some phones.
+- **A first-ever visit must be online.** Nothing is cached until the worker installs, so a student opening the link for the very first time with no connection gets nothing. Tell students to open the link once on campus Wi-Fi before quiz day.
+- **Offline submissions are queued, not delivered.** The result is saved to the device and written to Firestore on a later load (Section 27's `csa65pendingsync::` mechanism). A student who never reopens the app online never syncs — their downloaded CSV/JSON/PDF remains the fallback evidence.
+- **Offline support changes nothing about integrity** (Section 24). It's the same client-side JavaScript with the same limits.
+

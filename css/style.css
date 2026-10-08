@@ -419,3 +419,156 @@ input.paste-blocked, textarea.paste-blocked { animation: paste-blocked-flash 0.6
   .wrap { padding: 14px 12px 40px; }
   .grade-bar-row { flex-wrap: wrap; }
 }
+
+/* ==========================================================================
+   Service-worker toast (js/sw-register.js) — "ready offline" / "update
+   available". Fixed to the bottom of the viewport rather than inserted into
+   the page flow, so it never shifts a question the student is mid-answer on.
+
+   The toast gets its own --toast-* tokens rather than reusing --console
+   directly: in light mode a dark console-coloured pill reads as a raised
+   surface, but in dark mode --console (#0B0C10) sits almost exactly on top of
+   --paper (#101116) and the toast all but disappears. Dark mode therefore
+   lifts it above the page instead of sinking it below. Both dark selectors are
+   needed to match the rest of this stylesheet: the explicit toggle
+   (data-theme) and the OS preference.
+   ========================================================================== */
+:root {
+  --toast-bg: var(--console);
+  --toast-fg: var(--console-ink);
+  --toast-border: color-mix(in srgb, var(--console-ink) 20%, transparent);
+}
+:root[data-theme="dark"] {
+  --toast-bg: color-mix(in srgb, var(--surface) 90%, var(--signal));
+  --toast-fg: var(--ink);
+  --toast-border: color-mix(in srgb, var(--signal) 42%, var(--line));
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --toast-bg: color-mix(in srgb, var(--surface) 90%, var(--signal));
+    --toast-fg: var(--ink);
+    --toast-border: color-mix(in srgb, var(--signal) 42%, var(--line));
+  }
+}
+
+.sw-toast {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 9999; max-width: min(560px, calc(100vw - 24px));
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--toast-bg); color: var(--toast-fg);
+  border: 1px solid var(--toast-border); border-radius: 12px;
+  padding: 11px 14px; font-size: 13px; line-height: 1.45;
+  box-shadow: 0 8px 28px rgba(0,0,0,.34);
+  animation: sw-toast-in .22s ease-out;
+}
+@keyframes sw-toast-in { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (prefers-reduced-motion: reduce) { .sw-toast { animation: none; } }
+
+.sw-toast-text { flex: 1 1 220px; }
+
+.sw-toast-btn {
+  flex: 0 0 auto; cursor: pointer;
+  font-family: var(--font-mono); font-size: 11.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .03em;
+  padding: 7px 13px; border-radius: 8px;
+  background: transparent; color: var(--toast-fg);
+  border: 1px solid color-mix(in srgb, var(--toast-fg) 38%, transparent);
+}
+.sw-toast-btn:hover { background: color-mix(in srgb, var(--toast-fg) 12%, transparent); }
+.sw-toast-btn--action { background: var(--signal); color: var(--signal-ink); border-color: var(--signal); }
+.sw-toast-btn--action:hover { background: color-mix(in srgb, var(--signal) 85%, #fff); }
+.sw-toast-btn:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  .sw-toast { left: 12px; right: 12px; bottom: 12px; transform: none; max-width: none; }
+  @keyframes sw-toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+}
+
+/* ==========================================================================
+   Question bank editor (js/bank-editor.js, teacher.html tab 1b)
+
+   Two panes: a scrollable question list and the form for the selected one.
+   The list keeps its own scroll rather than growing the page, because a bank
+   of 50+ questions would otherwise push the form far below the fold and make
+   "click a flagged question, fix it" a scrolling exercise.
+   ========================================================================== */
+.editor-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.editor-search { flex: 1 1 260px; min-width: 0; }
+.editor-add-type { flex: 0 0 auto; }
+.editor-add-btn { flex: 0 0 auto; }
+
+.editor-status {
+  font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .02em;
+  color: var(--graphite); margin-bottom: 10px;
+}
+.editor-status.has-problems { color: var(--error); font-weight: 600; }
+
+.editor-layout { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
+
+.editor-list {
+  border: 1px solid var(--line); border-radius: 10px; overflow-y: auto;
+  max-height: 620px; background: var(--surface);
+}
+.editor-row {
+  display: grid; grid-template-columns: minmax(0, auto) 1fr; gap: 2px 8px;
+  width: 100%; text-align: left; cursor: pointer;
+  padding: 9px 11px; border: 0; border-bottom: 1px solid var(--line);
+  background: transparent; color: var(--ink); font: inherit;
+}
+.editor-row:last-child { border-bottom: 0; }
+.editor-row:hover { background: color-mix(in srgb, var(--signal) 7%, var(--surface)); }
+.editor-row.selected { background: color-mix(in srgb, var(--signal) 14%, var(--surface)); }
+.editor-row.invalid { border-left: 3px solid var(--error); padding-left: 8px; }
+
+.editor-row-id { font-family: var(--font-mono); font-size: 10.5px; color: var(--graphite); }
+.editor-row-type {
+  font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+  letter-spacing: .03em; color: var(--chip-teal); justify-self: start;
+}
+.editor-row-q {
+  grid-column: 1 / -1; font-family: var(--font-serif); font-size: 13px; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.editor-row-flag {
+  grid-column: 1 / -1; font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  color: var(--error); text-transform: uppercase; letter-spacing: .03em;
+}
+
+.editor-form-pane { min-width: 0; }
+.editor-empty { padding: 22px 14px; color: var(--graphite); font-size: 13px; text-align: center; }
+.editor-hint { font-size: 11.5px; color: var(--graphite); margin-top: 4px; line-height: 1.4; }
+
+.editor-check { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; }
+.editor-check input { margin: 0; }
+
+.editor-option-row { display: flex; align-items: center; gap: 9px; margin-bottom: 7px; }
+.editor-option-row input[type="radio"], .editor-option-row input[type="checkbox"] { flex: 0 0 auto; margin: 0; }
+.editor-option-text { flex: 1 1 auto; min-width: 0; }
+.editor-option-remove {
+  flex: 0 0 auto; cursor: pointer; width: 30px; height: 30px; line-height: 1;
+  border: 1px solid var(--line); border-radius: 7px;
+  background: transparent; color: var(--graphite); font-size: 13px;
+}
+.editor-option-remove:hover { color: var(--error); border-color: var(--error); }
+.editor-add-option { font-size: 12px; padding: 6px 13px; }
+
+.editor-list-input { font-family: var(--font-mono); font-size: 12.5px; }
+
+.editor-valid {
+  font-family: var(--font-mono); font-size: 11.5px; font-weight: 600;
+  color: var(--correct); margin: 12px 0;
+}
+.editor-problems { margin: 12px 0; }
+.editor-problems ul { margin: 6px 0 0; padding-left: 20px; }
+.editor-problems li { margin-bottom: 3px; }
+.editor-confirm { margin-top: 14px; }
+.editor-actions { margin-top: 16px; flex-wrap: wrap; }
+.editor-delete { color: var(--error); border-color: color-mix(in srgb, var(--error) 45%, var(--line)); }
+.editor-delete:hover:not(:disabled) { background: color-mix(in srgb, var(--error) 12%, transparent); }
+
+@media (max-width: 860px) {
+  /* One column, and the list capped shorter so the form stays reachable
+     without a long scroll past it on a phone. */
+  .editor-layout { grid-template-columns: 1fr; }
+  .editor-list { max-height: 280px; }
+}

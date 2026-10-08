@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Teacher Panel — CSA65 Quiz Management System</title>
 <script>(function(){try{var t=localStorage.getItem('csa65theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4EF">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#17181C">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -23,6 +28,7 @@
 
   <div class="tab-bar" id="teacherTabBar">
     <button class="tab-btn active" data-tab="load" onclick="switchTab('load')" type="button"><span class="tab-num">1</span><span>Load Bank</span></button>
+    <button class="tab-btn" data-tab="edit" onclick="switchTab('edit')" type="button" disabled><span class="tab-num">1b</span><span>Edit Bank</span></button>
     <button class="tab-btn" data-tab="filter" onclick="switchTab('filter')" type="button" disabled><span class="tab-num">2</span><span>Filter</span></button>
     <button class="tab-btn" data-tab="ai" onclick="switchTab('ai')" type="button" disabled><span class="tab-num">2b</span><span>AI Generate</span></button>
     <button class="tab-btn" data-tab="settings" onclick="switchTab('settings')" type="button" disabled><span class="tab-num">3</span><span>Settings</span></button>
@@ -41,6 +47,82 @@
     </div>
     <div id="bankLoadError"></div>
     <div id="bankStats" style="font-size:12.5px; color:var(--graphite); margin-top:8px;"></div>
+  </div>
+
+  <div class="card tab-panel" id="editorSection" data-tab="edit">
+    <h2>1b. Edit Question Bank</h2>
+    <p style="font-size:13px; color:var(--graphite); margin:0 0 14px;">
+      Add, edit, reorder and delete questions here instead of hand-editing <code>data/questions-*.json</code>.
+      Every question is checked against the same schema the server uses, so a question that saves here is one a student can actually answer.
+      Save to <strong>Firestore</strong> to have the change reach students on their next load with no commit and no redeploy, and/or
+      <strong>download the JSON</strong> to commit as a versioned copy.
+    </p>
+
+    <div id="editorDraftNotice"></div>
+
+    <div class="grid3">
+      <div class="field">
+        <label>Unit</label>
+        <input type="text" id="editorUnit" placeholder="I">
+      </div>
+      <div class="field">
+        <label>Unit Title</label>
+        <input type="text" id="editorUnitTitle" placeholder="Fundamentals of Generative AI and LLMs">
+      </div>
+      <div class="field">
+        <label>Bank ID (Firestore)</label>
+        <input type="text" id="editorBankId" placeholder="questions-unit1">
+      </div>
+    </div>
+
+    <div class="editor-toolbar">
+      <input type="text" id="editorSearch" class="editor-search" placeholder="Search questions by text, id, topic or type…">
+      <select id="editorAddType" class="editor-add-type" aria-label="Type for the new question">
+        <option value="mcq">MCQ</option>
+        <option value="truefalse">True / False</option>
+        <option value="multiselect">Multi-Select</option>
+        <option value="fillblank">Fill in the Blank</option>
+        <option value="descriptive">Descriptive</option>
+        <option value="scenario">Scenario</option>
+        <option value="codeoutput">Code Output</option>
+        <option value="debugging">Debugging</option>
+        <option value="promptengineering">Prompt Engineering</option>
+      </select>
+      <button class="btn-primary editor-add-btn" type="button" onclick="editorAddQuestion()">+ Add Question</button>
+    </div>
+
+    <div id="editorStatus" class="editor-status"></div>
+
+    <div class="editor-layout">
+      <div class="editor-list-pane">
+        <div id="editorList" class="editor-list"></div>
+      </div>
+      <div class="editor-form-pane">
+        <div id="editorForm"></div>
+      </div>
+    </div>
+
+    <h2 style="margin-top:22px;">Save</h2>
+    <div id="editorSaveError"></div>
+    <div class="btn-row">
+      <button class="btn-secondary" type="button" onclick="editorDownloadJson()">Download questions JSON</button>
+    </div>
+    <div class="footnote">Commit the downloaded file to <code>data/</code> to version it in the repo. This works with no Firebase at all.</div>
+
+    <h3 style="margin-top:18px; font-size:14px;">Save to Firestore (live for students)</h3>
+    <div id="editorAuthGate"></div>
+    <div id="editorSaveControls" style="display:none;">
+      <div class="btn-row">
+        <button class="btn-primary" id="editorSaveBtn" type="button" onclick="editorSaveToFirestore()">Save Bank to Firestore</button>
+        <button class="btn-secondary" type="button" onclick="editorOpenFirestoreBank()">Open a Firestore Bank</button>
+        <button class="btn-secondary" type="button" onclick="AuthGuard.signOut()">Sign Out</button>
+      </div>
+      <div id="editorSaveStatus" class="ai-generate-status" style="display:none;">
+        <span class="ai-spinner" aria-hidden="true"></span> Saving…
+      </div>
+      <div id="editorSaveMeta" style="font-size:12.5px; color:var(--graphite); margin-top:8px;"></div>
+      <div id="editorBankList"></div>
+    </div>
   </div>
 
   <div class="card tab-panel" id="filterSection" data-tab="filter">
@@ -210,8 +292,21 @@
 
     <div id="keywordBankControls" style="display:none;">
       <div class="field">
+        <label for="keywordBankAssessment">Assessment this rubric belongs to</label>
+        <select id="keywordBankAssessment"></select>
+        <div style="font-size:12px; color:var(--graphite); margin-top:5px;">
+          The rubric is stored against the assessment, so two subjects that both have a &ldquo;Unit I&rdquo; no longer share
+          (and overwrite) one grading rubric. Choosing the unit-only option writes the older unit-wide rubric instead,
+          which every assessment on that unit falls back to when it has none of its own.
+        </div>
+      </div>
+      <div class="field">
         <label>Syllabus File (.docx or .pdf)</label>
         <input type="file" id="syllabusFile" accept=".docx,.pdf">
+        <div style="font-size:12px; color:var(--graphite); margin-top:5px;" id="keywordBankFileHint">
+          Optional when the selected assessment&rsquo;s unit already has material or a committed syllabus path &mdash; the
+          stored text is reused instead of re-uploading it.
+        </div>
       </div>
       <div class="checkbox-item" style="margin-bottom:10px;">
         <input type="checkbox" id="forceRegenerate">
@@ -246,10 +341,18 @@
 
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
 <script src="js/firebase-config.js"></script>
 <script src="js/auth-guard.js"></script>
+<script src="js/firestore-client.js"></script>
+<script src="lib/assessmentRegistry.js"></script>
 <script src="js/data-loader.js"></script>
 <script src="js/theme.js"></script>
+<script src="js/sw-register.js"></script>
+<!-- Shared with the server (api/) — see the dual-mode note at the top of each. -->
+<script src="lib/questionValidator.js"></script>
+<script src="lib/duplicateChecker.js"></script>
+<script src="js/bank-editor.js"></script>
 <script src="js/teacher-config.js"></script>
 <script>
   /** Switches which step's panel is visible; refuses to switch to a still-locked (disabled) tab. */
@@ -296,8 +399,34 @@
     });
   }
   initKeywordBankAuthGate();
+  initKeywordBankAssessments();
+
+  /** Bank-editor inputs that live outside BankEditor's own rendered DOM. */
+  function initBankEditorInputs() {
+    document.getElementById('editorUnit')
+      .addEventListener('input', e => BankEditor.setUnit(e.target.value));
+    document.getElementById('editorUnitTitle')
+      .addEventListener('input', e => BankEditor.setUnitTitle(e.target.value));
+    document.getElementById('editorSearch')
+      .addEventListener('input', e => BankEditor.setSearch(e.target.value));
+    document.getElementById('editorBankId')
+      .addEventListener('input', e => BankEditor.setBankId(e.target.value.trim()));
+  }
+
+  initBankEditorInputs();
+  initEditorAuthGate();
+
+  // Unsaved editor work is kept in a localStorage draft, but that's only
+  // discoverable on the next load — worth a browser-level warning first.
+  window.addEventListener('beforeunload', (e) => {
+    if (typeof BankEditor !== 'undefined' && BankEditor.isDirty()) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
 
   Theme.init();
+  SWRegister.init();
 </script>
 </body>
 </html>

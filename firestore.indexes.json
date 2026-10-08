@@ -1,0 +1,38 @@
+{
+  "_comment": "Composite indexes for the teacher dashboard's submission queries (js/firestore-client.js querySubmissions). Declared here so they are reproducible instead of being created by clicking the link in a FAILED_PRECONDITION error, which is how they were made until now. Each entry pairs one equality/array filter with the orderBy('submittedAt','desc') every query applies. Combinations of several filters at once need their own index and will still surface a console link the first time they are used — that is a deliberate trade: declaring all 16 combinations would cost index storage for queries nobody runs.",
+  "indexes": [
+    {
+      "collectionGroup": "submissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "unit", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "submissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assessment_id", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "submissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "student.rollNo", "order": "ASCENDING" },
+        { "fieldPath": "submittedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "submissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "topics", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "submittedAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

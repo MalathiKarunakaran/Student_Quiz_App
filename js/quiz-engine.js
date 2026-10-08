@@ -188,11 +188,16 @@ const QuizEngine = (() => {
     let scoreResult = Scorer.scoreQuiz(state.quiz, state.answers, state.config.negativeMarking);
 
     // Upgrade descriptive/scenario/prompt-engineering/open-debugging questions
-    // to server-side keyword-bank grading when a bank exists for this unit;
-    // gracefully falls back to the plain-keyword result already computed
-    // above when the server/bank isn't reachable — see js/open-ended-grader.js.
-    const unit = (state.config.filters && state.config.filters.unit) || "";
-    const openEndedResults = await OpenEndedGrader.gradeAll(state.quiz, state.answers, unit);
+    // to server-side keyword-bank grading when a bank exists for this
+    // assessment; gracefully falls back to the plain-keyword result already
+    // computed above when the server/bank isn't reachable — see
+    // js/open-ended-grader.js. Both identifiers are sent: assessment_id is the
+    // key a bank is stored under now, and filters.unit lets the server fall
+    // back to a bank generated before that re-keying.
+    const openEndedResults = await OpenEndedGrader.gradeAll(state.quiz, state.answers, {
+      assessment_id: state.config.assessment_id || null,
+      unit: (state.config.filters && state.config.filters.unit) || ""
+    });
     if (Object.keys(openEndedResults).length > 0) {
       scoreResult = mergeOpenEndedResults(scoreResult, openEndedResults);
     }

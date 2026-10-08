@@ -15,14 +15,213 @@ let loadedBank = [];
 async function initTeacherPanel() {
   const bankPath = document.getElementById('bankPath').value;
   try {
-    loadedBank = await DataLoader.loadQuestionBank(bankPath);
+    // loadBank(), not loadQuestionBank(): the editor needs the bank's `unit`
+    // and `unitTitle` too, not just the questions array.
+    const bank = await DataLoader.loadBank(bankPath);
+    loadedBank = bank.questions || [];
     populateFilterUI(loadedBank);
     document.getElementById('bankLoadError').innerHTML = '';
     document.getElementById('bankStats').textContent =
       `Loaded ${loadedBank.length} questions from ${bankPath}.`;
+
+    initEditorWithBank(bank, defaultBankIdFor(bankPath));
   } catch (e) {
     document.getElementById('bankLoadError').innerHTML =
       `<div class="error-box">Could not load question bank: ${e.message}</div>`;
+  }
+}
+
+/* =========================================================================
+   Bank editor glue (README Section 30). BankEditor owns the editing state and
+   the DOM inside the editor panel; everything here is the wiring between it,
+   the rest of the teacher panel, and the two save targets.
+   ========================================================================= */
+
+/** `data/questions-unit1.json` → `questions-unit1`; `firestore:x` → `x`. */
+function defaultBankIdFor(ref) {
+  if (DataLoader.isFirestoreRef(ref)) return DataLoader.firestoreBankId(ref);
+  return String(ref).split('/').pop().replace(/\.json$/i, '');
+}
+
+function initEditorWithBank(bank, bankId) {
+  BankEditor.load(bank, bankId);
+  document.getElementById('editorBankId').value = bankId;
+
+  // The filter/CO-coverage UI reads `loadedBank`, so keep it in step with the
+  // edits as they happen rather than only at save time — otherwise Step 2
+  // would quietly be filtering a bank that no longer exists.
+  BankEditor.setOnBankChanged(updated => {
+    loadedBank = updated.questions;
+    populateFilterUI(loadedBank);
+  });
+
+  offerDraftIfNewer(bankId);
+}
+
+/**
+ * A draft is only offered, never auto-applied. Silently restoring could
+ * resurrect edits the instructor already decided against — and they'd have no
+ * way to tell that what they're looking at isn't what they just loaded.
+ */
+function offerDraftIfNewer(bankId) {
+  const notice = document.getElementById('editorDraftNotice');
+  notice.innerHTML = '';
+  const draft = BankEditor.readDraft(bankId);
+  if (!draft) return;
+
+  const when = new Date(draft.savedAt).toLocaleString();
+  notice.innerHTML = `
+    <div class="unanswered-banner">
+      You have unsaved edits to this bank from ${when}
+      (${draft.bank.questions.length} questions).
+      <button class="btn-secondary" type="button" id="draftRestoreBtn" style="margin-left:8px;">Restore them</button>
+      <button class="btn-secondary" type="button" id="draftDiscardBtn">Discard</button>
+    </div>`;
+  document.getElementById('draftRestoreBtn').onclick = () => {
+    BankEditor.load(draft.bank, bankId);
+    loadedBank = draft.bank.questions;
+    populateFilterUI(loadedBank);
+    notice.innerHTML = '<div class="editor-valid">Draft restored. It is not saved anywhere yet — use the Save buttons below.</div>';
+  };
+  document.getElementById('draftDiscardBtn').onclick = () => {
+    BankEditor.discardDraft(bankId);
+    notice.innerHTML = '';
+  };
+}
+
+function editorAddQuestion() {
+  BankEditor.addQuestion(document.getElementById('editorAddType').value);
+}
+
+/** Blocks both save paths on the same schema check, so neither can ship a broken question. */
+function editorBlockingProblems() {
+  const problems = BankEditor.allProblems();
+  const box = document.getElementById('editorSaveError');
+  if (problems.length === 0) { box.innerHTML = ''; return null; }
+  box.innerHTML =
+    `<div class="error-box"><strong>${problems.length} question(s) can't be saved yet:</strong><ul>` +
+    problems.slice(0, 8).map(p =>
+      `<li><code>${p.id || '(no id)'}</code> — ${p.reasons.join('; ')}</li>`).join('') +
+    (problems.length > 8 ? `<li>…and ${problems.length - 8} more.</li>` : '') +
+    `</ul>Click a flagged question in the list to fix it.</div>`;
+  return problems;
+}
+
+function editorDownloadJson() {
+  if (editorBlockingProblems()) return;
+  const bank = BankEditor.toSaveable();
+  const bankId = document.getElementById('editorBankId').value.trim() || 'questions';
+  const blob = new Blob([JSON.stringify(bank, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${bankId}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  BankEditor.clearDirty();
+  BankEditor.render();
+}
+
+function initEditorAuthGate() {
+  const gate = document.getElementById('editorAuthGate');
+  const controls = document.getElementById('editorSaveControls');
+  if (!FirebaseApp.isConfigured()) {
+    gate.innerHTML =
+      '<div class="footnote">Firebase isn\'t configured in this deployment, so live Firestore saving is unavailable. ' +
+      'The “Download questions JSON” button above still works — see <code>docs/firebase-setup.md</code>.</div>';
+    return;
+  }
+  AuthGuard.onAuthChange(user => {
+    if (user) {
+      gate.innerHTML = `<div class="footnote">Signed in as ${user.email}.</div>`;
+      controls.style.display = 'block';
+    } else {
+      controls.style.display = 'none';
+      AuthGuard.renderLoginForm(gate, { title: 'Sign in to save question banks' });
+    }
+  });
+}
+
+async function editorSaveToFirestore() {
+  if (editorBlockingProblems()) return;
+
+  const bankId = document.getElementById('editorBankId').value.trim();
+  const errBox = document.getElementById('editorSaveError');
+  if (!bankId) {
+    errBox.innerHTML = '<div class="error-box">Enter a Bank ID — it is the Firestore document name students\' quizzes point at.</div>';
+    return;
+  }
+
+  const btn = document.getElementById('editorSaveBtn');
+  const status = document.getElementById('editorSaveStatus');
+  btn.disabled = true;
+  status.style.display = 'flex';
+  errBox.innerHTML = '';
+
+  try {
+    const bank = BankEditor.toSaveable();
+    const user = AuthGuard.getCurrentUser();
+    await FirestoreClient.saveQuestionBank(bankId, bank, user.email);
+    BankEditor.setBankId(bankId);
+    BankEditor.clearDirty();
+    BankEditor.render();
+    document.getElementById('editorSaveMeta').innerHTML =
+      `Saved ${bank.questions.length} questions to <code>questionBanks/${bankId}</code> at ${new Date().toLocaleTimeString()}. ` +
+      `Point a quiz at it with the bank path <code>firestore:${bankId}</code> — students get it on their next load.`;
+  } catch (e) {
+    errBox.innerHTML = `<div class="error-box">Could not save to Firestore: ${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    status.style.display = 'none';
+  }
+}
+
+async function editorOpenFirestoreBank() {
+  const host = document.getElementById('editorBankList');
+  host.innerHTML = '<div class="footnote">Loading banks…</div>';
+  try {
+    const banks = await FirestoreClient.listQuestionBanks();
+    if (banks.length === 0) {
+      host.innerHTML = '<div class="footnote">No question banks saved to Firestore yet.</div>';
+      return;
+    }
+    host.innerHTML =
+      '<div class="dash-table-wrap"><table class="dash-table"><thead><tr>' +
+      '<th>Bank ID</th><th>Title</th><th>Questions</th><th>Last saved</th><th></th>' +
+      '</tr></thead><tbody>' +
+      banks.map(b => `<tr>
+        <td><code>${b.id}</code></td>
+        <td>${b.unitTitle || '—'}</td>
+        <td>${b.questionCount}</td>
+        <td>${b.updatedAt ? new Date(b.updatedAt).toLocaleString() : '—'}</td>
+        <td><button class="btn-secondary" type="button" data-bank-id="${b.id}">Open</button></td>
+      </tr>`).join('') +
+      '</tbody></table></div>';
+
+    host.querySelectorAll('button[data-bank-id]').forEach(btn => {
+      btn.onclick = () => openFirestoreBank(btn.dataset.bankId);
+    });
+  } catch (e) {
+    host.innerHTML = `<div class="error-box">Could not list banks: ${e.message}</div>`;
+  }
+}
+
+async function openFirestoreBank(bankId) {
+  if (BankEditor.isDirty() &&
+      !window.confirm('You have unsaved edits. Opening another bank will leave them only in the local draft. Continue?')) {
+    return;
+  }
+  const host = document.getElementById('editorBankList');
+  try {
+    const bank = await FirestoreClient.loadQuestionBank(bankId);
+    document.getElementById('bankPath').value = `firestore:${bankId}`;
+    loadedBank = bank.questions;
+    populateFilterUI(loadedBank);
+    initEditorWithBank(bank, bankId);
+    document.getElementById('bankStats').textContent =
+      `Loaded ${loadedBank.length} questions from firestore:${bankId}.`;
+    host.innerHTML = `<div class="editor-valid">Opened <code>${bankId}</code>.</div>`;
+  } catch (e) {
+    host.innerHTML = `<div class="error-box">Could not open "${bankId}": ${e.message}</div>`;
   }
 }
 
@@ -187,9 +386,11 @@ function renderAiGenerationMeta(meta) {
  * Calls the Hermes Agent (POST /api/generate-questions) using the same
  * topic/difficulty/type checkboxes already populated by populateFilterUI(),
  * plus the Bloom-distribution and question-count fields in the AI card.
- * On success, the new questions are appended to loadedBank (the existing
- * static bank is never discarded) and the whole filter/settings pipeline is
- * refreshed exactly as if a bigger static bank had been loaded.
+ * On success the new questions are appended to the bank held by BankEditor
+ * (the existing bank is never discarded) and the whole filter/settings
+ * pipeline is refreshed exactly as if a bigger bank had been loaded. They are
+ * then ordinary editable questions: reviewable, and persisted by the editor's
+ * own save buttons rather than disappearing when the tab closes.
  */
 /** Reads a File as base64 (no "data:...;base64," prefix — the server expects raw base64). */
 function readFileAsBase64(file) {
@@ -202,11 +403,45 @@ function readFileAsBase64(file) {
 }
 
 /**
+ * Fills the Step 5 assessment picker from the registry. The first option is the
+ * legacy unit-wide rubric, kept because it is what every already-generated bank
+ * is keyed by and what an assessment without its own rubric falls back to.
+ *
+ * A registry that cannot be loaded (static hosting without the file, a bad
+ * edit) must not take the whole step down — the legacy option alone still
+ * produces a working rubric, so the failure degrades to the old behaviour.
+ */
+async function initKeywordBankAssessments() {
+  const select = document.getElementById('keywordBankAssessment');
+  if (!select) return;
+
+  select.innerHTML = '<option value="">Unit-wide rubric (legacy — all assessments on the selected unit)</option>';
+
+  try {
+    const registry = await DataLoader.loadRegistry();
+    AssessmentRegistry.listAssessments(registry).forEach(({ subject, unit, assessment }) => {
+      const option = document.createElement('option');
+      option.value = assessment.assessment_id;
+      option.textContent = `${subject.code || subject.name} · ${unit.name} · ${assessment.title}` +
+        (assessment.status === 'published' ? '' : ` (${assessment.status})`);
+      select.appendChild(option);
+    });
+  } catch (e) {
+    console.warn('Keyword bank: registry unavailable, only the legacy unit-wide option is offered.', e.message);
+  }
+}
+
+/**
  * Uploads the syllabus file selected in Step 5 and calls the Hermes keyword-
  * bank endpoint (/api/generate-keywords), teacher-auth-gated. On success, the
- * generated bank is stored server-side in Firestore (keywordBanks/{unit}) —
- * nothing further is needed client-side for student.html's grading to pick
- * it up automatically on next submit.
+ * generated bank is stored server-side in Firestore, keyed by the chosen
+ * assessment (keywordBanks/{assessment_id}) or by the unit for the legacy
+ * option — nothing further is needed client-side for student.html's grading to
+ * pick it up automatically on next submit.
+ *
+ * The file is optional when an assessment is chosen whose unit already has
+ * stored material or a committed syllabus path: the server reuses that text
+ * rather than asking the teacher to find and re-upload the same document.
  */
 async function generateKeywordBankFromSyllabus() {
   const errorEl = document.getElementById('keywordBankError');
@@ -214,13 +449,14 @@ async function generateKeywordBankFromSyllabus() {
   const metaEl = document.getElementById('keywordBankMeta');
   const button = document.getElementById('keywordBankGenerateBtn');
   const fileInput = document.getElementById('syllabusFile');
+  const assessmentId = document.getElementById('keywordBankAssessment').value;
 
   errorEl.innerHTML = '';
   metaEl.textContent = '';
 
   const file = fileInput.files[0];
-  if (!file) {
-    errorEl.innerHTML = '<div class="error-box">Choose a .docx or .pdf syllabus file first.</div>';
+  if (!file && !assessmentId) {
+    errorEl.innerHTML = '<div class="error-box">Choose a .docx or .pdf syllabus file first — the legacy unit-wide rubric has no stored material to fall back on.</div>';
     return;
   }
 
@@ -229,24 +465,38 @@ async function generateKeywordBankFromSyllabus() {
 
   try {
     const idToken = await AuthGuard.getIdToken();
-    const fileBase64 = await readFileAsBase64(file);
     const unit = document.getElementById('unitSelect').value;
     const unitTitle = document.getElementById('unitSelect').selectedOptions[0].textContent;
 
-    const result = await DataLoader.generateKeywords({
+    const payload = {
       unit,
       unitTitle,
-      filename: file.name,
-      fileBase64,
       forceRegenerate: document.getElementById('forceRegenerate').checked
-    }, idToken);
+    };
+    // Sent only when chosen: its presence is what switches the server from the
+    // legacy unit key to the assessment key.
+    if (assessmentId) payload.assessment_id = assessmentId;
+    if (file) {
+      payload.filename = file.name;
+      payload.fileBase64 = await readFileAsBase64(file);
+    }
+
+    const result = await DataLoader.generateKeywords(payload, idToken);
 
     if (result.skipped) {
       metaEl.textContent = result.reason;
     } else {
-      metaEl.textContent = `Keyword bank generated: ${result.coverage.generated}/${result.coverage.requested} questions covered` +
+      const required = result.coverage.requiredConcepts;
+      metaEl.textContent = `Keyword bank "${result.bankId}" generated: ${result.coverage.generated}/${result.coverage.requested} questions covered` +
         (result.coverage.droppedCount ? `, ${result.coverage.droppedCount} dropped (invalid)` : '') +
+        (required ? `, ${required} required concept${required === 1 ? '' : 's'}` : '') +
         ` · model ${result.model}.`;
+      // Gemini over-marking concepts as required is corrected rather than
+      // rejected, so the teacher should still be told it happened.
+      if (result.warnings && result.warnings.length) {
+        errorEl.innerHTML = '<div class="footnote">Adjusted while validating: ' +
+          result.warnings.map(w => `${w.questionId} — ${w.warning}`).join('; ') + '</div>';
+      }
     }
   } catch (e) {
     errorEl.innerHTML = `<div class="error-box">Keyword bank generation failed: ${e.message}</div>`;
@@ -277,11 +527,28 @@ async function generateQuestionsWithAI() {
     };
 
     const result = await DataLoader.generateQuestions(payload);
-    loadedBank = loadedBank.concat(result.questions);
+
+    // Route AI output through the editor rather than only into `loadedBank`.
+    // Previously these questions existed solely in this array, which nothing
+    // ever persisted — the shareable link stores the bank's *path*, not its
+    // questions, so a student opening the link fetched the committed file and
+    // never saw a single generated question. They are now ordinary editable
+    // questions in the bank, reviewable before they go anywhere and saved by
+    // the same two buttons as everything else.
+    const addedIds = BankEditor.appendQuestions(result.questions);
+    loadedBank = BankEditor.getBank().questions;
     populateFilterUI(loadedBank);
     document.getElementById('bankStats').textContent =
-      `Loaded ${loadedBank.length} questions (includes ${result.questions.length} newly AI-generated).`;
+      `Loaded ${loadedBank.length} questions (includes ${addedIds.length} newly AI-generated).`;
+    // renderAiGenerationMeta() sets textContent, so it has to run before the
+    // notice is appended or it would wipe it.
     renderAiGenerationMeta(result.meta);
+    const notice = document.createElement('div');
+    notice.className = 'editor-valid';
+    notice.textContent =
+      `Added ${addedIds.length} question(s) to the editor (tab 1b). Review them there, ` +
+      `then save — they are not stored anywhere until you do.`;
+    document.getElementById('aiGenerateMeta').appendChild(notice);
   } catch (e) {
     errorEl.innerHTML = `<div class="error-box">AI generation failed: ${e.message}</div>`;
   } finally {

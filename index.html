@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CSA65 Quiz Management System</title>
 <script>(function(){try{var t=localStorage.getItem('csa65theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F6F4EF">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#17181C">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -43,6 +48,7 @@
   </div>
 </div>
 <script src="js/theme.js"></script>
-<script>Theme.init();</script>
+<script src="js/sw-register.js"></script>
+<script>Theme.init(); SWRegister.init();</script>
 </body>
 </html>

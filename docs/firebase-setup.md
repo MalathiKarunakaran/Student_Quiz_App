@@ -91,3 +91,70 @@ Hermes Agent question generation.
   Firestore error asking you to create a composite index, click the link it
   gives you — that's expected on first use of a new filter combination, not a
   bug.
+
+---
+
+## 8. Deploying rules and indexes (the CLI path)
+
+Until now this project had no `firebase.json`, so rules could only be edited by
+pasting them into the Firebase console. The CLI config added alongside this
+section (`firebase.json`, `.firebaserc`, `firestore.indexes.json`) makes
+`firestore.rules` and `storage.rules` in this repo the source of truth.
+
+`firebase.json` deliberately declares **only** `firestore` and `storage`. The app
+itself is served by GitHub Pages and Vercel, not Firebase Hosting, so there is no
+`hosting` block — and `firebase deploy` must never be run bare, because a bare
+deploy acts on every configured target.
+
+### Order matters: client first, then rules
+
+**`firestore.rules` now requires `assessment_id`, `subject_id`, `unit_id`,
+`attempt_id`, `attemptNumber` and `maxAttempts` on every submission create.** Only
+a client built after the attempt-identity change sends those. So:
+
+1. **Push the client first.** GitHub Pages (and Vercel) serve what is committed on
+   `main`. Until the new client is live, deploying these rules would refuse every
+   submission from the old one.
+2. **Then deploy the rules.**
+
+Deploying in the wrong order does not lose a student's marks — the old client
+queues a refused submission in `localStorage` and the new client replays it
+successfully on the student's next load — but it does mean a student submitting in
+that window sees "saved on this device" instead of a clean sync. Don't do it
+mid-exam.
+
+### The commands
+
+```bash
+# One-time, interactive (opens a browser):
+npx firebase login
+
+# Rules only — the safe, routine deploy:
+npx firebase deploy --only firestore:rules,storage --project csa65-quiz-app
+```
+
+An invalid ruleset fails at this step **without** replacing the live rules: the
+ruleset is compiled server-side before it is released. A failed deploy is
+therefore safe, and its error output is also the only rules syntax check
+available here — there is no `--dry-run`, and the Firestore emulator needs a Java
+runtime this machine does not have.
+
+### Indexes, separately and deliberately
+
+```bash
+npx firebase deploy --only firestore:indexes --project csa65-quiz-app
+```
+
+Kept out of the routine command above because **the first indexes deploy will
+offer to delete any composite index that was created by clicking a console error
+link and is not declared in `firestore.indexes.json`.** Read that prompt rather
+than accepting it blindly; if it proposes deleting an index you still use, add it
+to the file first. The four declared indexes cover each dashboard filter paired
+with its `submittedAt` ordering; combining several filters at once still needs its
+own index and will still surface a console link the first time.
+
+### Storage rules have never been deployed
+
+The bucket has existed since setup and has never been written to, so it has no
+rules of its own. `storage.rules` must be deployed **before the first material
+upload**, which the command above does.

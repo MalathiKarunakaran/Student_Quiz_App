@@ -74,12 +74,16 @@ const Exporter = (() => {
    */
   function exportSubmissionsCSV(submissions) {
     const header = [
-      "Roll No", "Name", "Quiz ID", "Quiz Title", "Unit", "Marks Earned", "Max Marks",
+      "Roll No", "Name", "Quiz ID", "Assessment ID", "Quiz Title", "Unit", "Attempt", "Max Attempts",
+      "Marks Earned", "Max Marks",
       "Percentage", "Passed", "Time Taken (seconds)", "Auto-Submitted", "Violation Count",
       "Submitted At", "Review Status"
     ];
+    // A submission written before attempts existed has no attemptNumber; it was
+    // one-attempt-only by construction, so 1 of 1 is accurate, not a guess.
     const rows = submissions.map(s => [
-      s.student.rollNo, s.student.name, s.quizId, s.quizTitle, s.unit,
+      s.student.rollNo, s.student.name, s.quizId, s.assessment_id || "N/A", s.quizTitle, s.unit,
+      s.attemptNumber || 1, s.maxAttempts || 1,
       s.totalEarned, s.totalMax, s.percentage, s.passed ? "Yes" : "No",
       s.timeTakenSeconds ?? "N/A", s.autoSubmitted ? "Yes" : "No", s.violationCount || 0,
       s.submittedAt || "N/A", s.reviewStatus

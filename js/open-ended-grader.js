@@ -5,7 +5,7 @@
  * the server-side keyword bank (POST /api/grade-open-ended), which only
  * exists on the Vercel deployment. On ANY failure — offline, plain GitHub
  * Pages hosting (no /api/ at all), no keyword bank generated yet for this
- * unit — falls back to the existing local plain-keyword js/scorer.js
+ * assessment — falls back to the existing local plain-keyword js/scorer.js
  * scoreQuestion() logic, unchanged, exactly like js/data-loader.js already
  * does for AI question generation. A student can always finish and see a
  * result, online or not.
@@ -27,14 +27,19 @@ const OpenEndedGrader = (() => {
   /**
    * quiz: the full generated question array (state.quiz).
    * answers: questionId -> raw answer (state.answers).
-   * unit: config.filters.unit — which keyword bank to grade against.
+   * identity: { assessment_id, unit } — which keyword bank to grade against.
+   *   assessment_id is the current key; unit is sent alongside it so the server
+   *   can fall back to a legacy unit-keyed bank for assessments whose bank
+   *   predates the re-keying (see api/grade-open-ended.js). A bare string is
+   *   still accepted and read as the unit, so an older caller keeps working.
    * Returns: { [questionId]: <same shape Scorer.scoreQuestion returns> } for
    * every open-ended question in the quiz. Never throws.
    */
-  async function gradeAll(quiz, answers, unit) {
+  async function gradeAll(quiz, answers, identity) {
     const openEnded = quiz.filter(isOpenEnded);
     if (openEnded.length === 0) return {};
 
+    const { assessment_id, unit } = typeof identity === "string" ? { unit: identity } : (identity || {});
     const items = openEnded.map(q => ({ questionId: q.id, answerText: answers[q.id] || "", marks: q.marks }));
     const byId = {};
 
@@ -42,7 +47,7 @@ const OpenEndedGrader = (() => {
       const res = await fetch("/api/grade-open-ended", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ unit, items }),
+        body: JSON.stringify({ assessment_id, unit, items }),
       });
 
       let body;
@@ -64,7 +69,7 @@ const OpenEndedGrader = (() => {
     }
 
     // Anything the server didn't return a bank entry for (no bank yet for
-    // this unit, or the whole call failed above) falls back locally.
+    // this assessment, or the whole call failed above) falls back locally.
     openEnded.forEach(q => {
       if (!byId[q.id]) byId[q.id] = localFallback(q, answers[q.id]);
     });

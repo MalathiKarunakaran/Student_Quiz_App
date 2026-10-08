@@ -1,0 +1,10 @@
+{
+  "_comment": "Firebase CLI project config. Deliberately declares ONLY firestore and storage: the app itself is served by GitHub Pages and Vercel, not Firebase Hosting, so there is no `hosting` block here and `firebase deploy` must never be run bare — see docs/firebase-setup.md for the exact commands.",
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
+}

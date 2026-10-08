@@ -30,23 +30,35 @@ service cloud.firestore {
 
       // Students are never authenticated — a submission is created directly
       // from student.html at quiz-submit time. The deterministic document ID
-      // (quizId__rollNo, enforced client-side) means a second create for the
-      // same quiz+student naturally fails as ALREADY_EXISTS with no extra
-      // rule needed to block resubmission/tampering-via-overwrite.
-      allow create: if isWellFormedSubmission(request.resource.data);
+      // means a second write for the same quiz+student+attempt lands on an
+      // EXISTING document, which Firestore evaluates as an `update` and the
+      // line above allows only for the teacher. That is what blocks
+      // resubmission and tampering-via-overwrite, and it needs no extra rule.
+      //
+      // (Note for anyone reading the client: this surfaces as
+      // `permission-denied`, not `already-exists`. The web SDK has no
+      // `create()`, so a blocked resubmission is always a refused update —
+      // see isSlotTakenError() in js/firestore-client.js.)
+      allow create: if isWellFormedSubmission(request.resource.data, submissionId);
 
-      function isWellFormedSubmission(d) {
+      function isWellFormedSubmission(d, submissionId) {
         let MAX_MARKS_PER_QUESTION = 10;
         return
           d.keys().hasAll([
             'quizId', 'unit', 'student', 'questionSnapshot', 'answers',
             'perQuestion', 'totalEarned', 'totalMax', 'percentage',
-            'submittedAt', 'reviewStatus', 'reviewedBy'
+            'submittedAt', 'reviewStatus', 'reviewedBy',
+            'assessment_id', 'subject_id', 'unit_id', 'attempt_id',
+            'attemptNumber', 'maxAttempts'
           ]) &&
           d.quizId is string && d.quizId.size() > 0 && d.quizId.size() < 200 &&
           d.student is map &&
           d.student.name is string && d.student.name.size() > 0 && d.student.name.size() < 200 &&
           d.student.rollNo is string && d.student.rollNo.size() > 0 && d.student.rollNo.size() < 50 &&
+          // After the student shape above, deliberately: this reads
+          // d.student.rollNo to rebuild the expected document id, and && here
+          // short-circuits, so the type checks are already known to hold.
+          hasValidAttemptIdentity(d, submissionId) &&
           d.questionSnapshot is list && d.questionSnapshot.size() > 0 && d.questionSnapshot.size() < 300 &&
           d.answers is map &&
           d.perQuestion is list &&
@@ -60,6 +72,160 @@ service cloud.firestore {
           d.reviewStatus == 'pending' &&     // can't self-mark reviewed/finalized
           d.reviewedBy == null;
       }
+
+      // ATTEMPT IDENTITY (§6, docs/AUDIT.md section H item 5).
+      //
+      // Two things are enforced here, and both of them matter:
+      //
+      // 1. The document id is BOUND to the attempt number. Attempt 1 must be at
+      //    `{quizId}__{rollNo}` — exactly the id used before attempts existed,
+      //    which is why no submission already in Firestore needs migrating — and
+      //    attempt n>1 must be at `{quizId}__{rollNo}__a{n}`. Without this a
+      //    student could park each resubmission at an id of their own invention
+      //    and the one-attempt guarantee would be worth nothing.
+      //
+      // 2. Anything past attempt 1 must be permitted by the assessment itself.
+      //    `max_attempts` is read from the live `assessments/{id}` document, so
+      //    the cap is server-enforced rather than client-trusted. Short-circuit
+      //    order is deliberate: attempt 1 — the overwhelmingly common path and
+      //    the only one a default quiz ever uses — never reaches the get(), so
+      //    it costs no extra document read.
+      //
+      // If the assessment document does not exist, get() returns null and the
+      // rule errors out, which denies the write. That is the intended default:
+      // a second attempt is allowed only where a live assessment record says so.
+      // It also means multi-attempt needs the registry mirrored into Firestore
+      // (`assessments/*`), not just sitting in data/assessments.json.
+      function hasValidAttemptIdentity(d, submissionId) {
+        return
+          d.attempt_id == submissionId &&          // id must match its own document
+          d.attemptNumber is int && d.attemptNumber >= 1 &&
+          d.maxAttempts is int && d.maxAttempts >= 1 && d.maxAttempts <= 100 &&
+          d.attemptNumber <= d.maxAttempts &&
+          (d.assessment_id == null || d.assessment_id is string) &&
+          (d.subject_id == null || d.subject_id is string) &&
+          (d.unit_id == null || d.unit_id is string) &&
+          (
+            d.attemptNumber == 1
+              ? submissionId == d.quizId + '__' + d.student.rollNo
+              : (
+                  submissionId == d.quizId + '__' + d.student.rollNo + '__a' + string(d.attemptNumber) &&
+                  d.assessment_id is string &&
+                  d.attemptNumber <= get(/databases/$(database)/documents/assessments/$(d.assessment_id)).data.max_attempts
+                )
+          );
+      }
+    }
+
+    // Question banks edited in teacher.html's bank editor (README Section 30).
+    //
+    // READABLE BY ANYONE, DELIBERATELY. Students are never authenticated, and
+    // student.html has to read the bank to render the quiz. This is NOT a new
+    // exposure: the alternative this replaces is a `data/questions-*.json`
+    // file committed to a public repo and served by GitHub Pages, which is
+    // equally readable by anyone — including its correctAnswer indices (an
+    // exposure already disclosed in README Section 18). Moving the bank here
+    // changes where it lives, not who can see it.
+    //
+    // Note the contrast with keywordBanks below, which is locked to the server
+    // entirely. That asymmetry is intentional and is about blast radius: a
+    // keyword bank is a *weighted, per-question grading rubric* for free-text
+    // answers — precisely gameable — whereas a question bank is the paper
+    // itself, which students see anyway the moment the quiz starts.
+    match /questionBanks/{bankId} {
+      allow read: if true;
+      allow write: if isTeacher() && isWellFormedBank(request.resource.data);
+
+      function isWellFormedBank(d) {
+        // Shape and gross bounds only — the same honest limitation as
+        // submissions above: rules_version 2 cannot iterate a list, so it
+        // cannot check each question's own fields. The real schema check runs
+        // in lib/questionValidator.js, which the editor blocks saving on.
+        // The teacher-only write gate is what makes that acceptable here:
+        // unlike submissions, this collection is not writable by the public.
+        return
+          d.keys().hasAll(['unit', 'unitTitle', 'questions', 'updatedAt', 'updatedBy']) &&
+          d.unit is string && d.unit.size() < 100 &&
+          d.unitTitle is string && d.unitTitle.size() < 300 &&
+          d.questions is list && d.questions.size() > 0 && d.questions.size() <= 500 &&
+          d.updatedAt == request.time &&                     // forces serverTimestamp()
+          d.updatedBy == request.auth.token.email;           // can't forge another author
+      }
+    }
+
+    // Uploaded assessment material (§2/§3) — the PDF/DOCX/TXT/MD/JSON a
+    // teacher uploads, its extracted text, and the structured knowledge object
+    // derived from it (topics, outcomes, concepts, definitions, and
+    // expected_answer_concepts).
+    //
+    // SERVER-ONLY, like keywordBanks below and for the same reason, not like
+    // questionBanks above. `expected_answer_concepts` is literally a grading
+    // rubric for free-text answers, and `extracted_text` is the source every
+    // answer key in the system is derived from. A student who could read this
+    // collection would hold the marking scheme for every descriptive question
+    // on the unit — strictly worse than seeing the question bank, which they
+    // see at quiz start anyway.
+    //
+    // All legitimate access runs through api/upload-material.js and
+    // api/process-material.js behind verifyTeacherToken(), using the Admin
+    // SDK, which bypasses these rules. The original bytes live in Cloud
+    // Storage under an equivalent deny-all (storage.rules).
+    match /materials/{materialId} {
+      allow read, write: if false;
+    }
+
+    // The assessment registry (§1/§9) — Subject → Unit → Topic → Assessment.
+    //
+    // Publicly readable, deliberately, and in the same spirit as questionBanks
+    // above: student.html has to resolve ?assessment=<id> into a quiz config
+    // without ever authenticating. The static fallback this mirrors,
+    // data/assessments.json, is a committed file on a public repo and is
+    // equally readable — moving it here changes where it lives, not who can
+    // see it.
+    //
+    // What that exposes is the catalogue: titles, durations, question counts,
+    // and the fact that a draft exists. It does NOT expose material or answer
+    // keys, which live in the two server-only collections. js/data-loader.js
+    // additionally refuses to open anything whose status is not "published",
+    // and reports a draft id as not-found so unreleased assessments do not
+    // leak through id-guessing — but that is a UI courtesy, not a boundary:
+    // anything in this collection should be assumed visible.
+    match /assessments/{assessmentId} {
+      allow read: if true;
+      allow write: if isTeacher() && isWellFormedAssessment(request.resource.data);
+
+      function isWellFormedAssessment(d) {
+        // Shape and gross bounds only — the same honest limitation as
+        // submissions and questionBanks: rules_version 2 cannot iterate a
+        // list. The real schema check is lib/assessmentRegistry.js's
+        // validateAssessment(), which both the teacher panel and the API
+        // block on. The teacher-only write gate is what makes that acceptable.
+        return
+          d.keys().hasAll(['assessment_id', 'subject_id', 'unit_id', 'title', 'type', 'status',
+                           'question_count', 'duration_minutes', 'max_attempts', 'updated_at']) &&
+          d.assessment_id is string && d.assessment_id.size() > 0 && d.assessment_id.size() <= 64 &&
+          d.assessment_id == assessmentId &&          // id must match its own document
+          d.subject_id is string && d.subject_id.size() > 0 && d.subject_id.size() <= 64 &&
+          d.unit_id is string && d.unit_id.size() > 0 && d.unit_id.size() <= 64 &&
+          d.title is string && d.title.size() > 0 && d.title.size() < 300 &&
+          d.type in ['quiz', 'assignment', 'exam', 'practice'] &&
+          d.status in ['draft', 'processing', 'under_review', 'published', 'archived'] &&
+          d.question_count is int && d.question_count > 0 && d.question_count <= 500 &&
+          d.duration_minutes is int && d.duration_minutes > 0 && d.duration_minutes <= 1440 &&
+          d.max_attempts is int && d.max_attempts >= 1 && d.max_attempts <= 100 &&
+          d.updated_at == request.time;              // forces serverTimestamp()
+      }
+    }
+
+    // Subjects and units — the two levels above assessments. Same public-read
+    // rationale: the student picker renders subject and unit names.
+    match /subjects/{subjectId} {
+      allow read: if true;
+      allow write: if isTeacher() &&
+        request.resource.data.subject_id == subjectId &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 &&
+        request.resource.data.name.size() < 300;
     }
 
     // The keyword bank is the weighted, per-question "answer key" for
@@ -68,7 +234,14 @@ service cloud.firestore {
     // server-side in api/grade-open-ended.js, and generation/writes happen
     // server-side in api/generate-keywords.js, both via the Admin SDK, which
     // bypasses these rules entirely.
-    match /keywordBanks/{unit} {
+    //
+    // The document id is an `assessment_id` (docs/AUDIT.md section H item 4).
+    // It was a bare unit key — a roman numeral — which meant two subjects that
+    // both had a "Unit I" shared one rubric and the second generated silently
+    // overwrote the first. Documents under the old key still exist and are
+    // still read as a fallback by api/grade-open-ended.js, which is why this
+    // match stays on a free wildcard rather than constraining the id shape.
+    match /keywordBanks/{bankId} {
       allow read, write: if false;
     }
   }

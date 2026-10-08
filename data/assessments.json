@@ -1,0 +1,94 @@
+{
+  "_comment": "Central assessment registry (docs/AUDIT.md section H, item 1). Subject -> Unit -> Topic -> Assessment. This file is the STATIC FALLBACK and seed: when Firebase is configured the live registry lives in Firestore and this file is what seeds it, and on plain static hosting (GitHub Pages, python -m http.server) it is read directly so the app keeps working with no backend at all. Teachers add subjects/units/assessments through teacher.html, which writes Firestore and can re-export this file — editing JavaScript is never required to add one. Schema and validation: lib/assessmentRegistry.js.",
+  "version": 1,
+  "updated_at": "2026-10-08T00:00:00.000Z",
+  "subjects": [
+    {
+      "subject_id": "csa65",
+      "code": "CSA65",
+      "name": "Generative AI and Large Language Models",
+      "units": [
+        {
+          "unit_id": "csa65-u1",
+          "name": "Unit I",
+          "title": "Fundamentals of Generative AI and Large Language Models",
+          "_comment_legacy": "legacy_unit_key maps this unit back to the bare roman numeral stored on every question in data/questions-unit1.json (q.unit === 'I') and used as the keywordBanks/{unit} document id. It is what lets a registry-driven assessment reuse an existing committed bank unchanged. New units created from uploaded material do not need it.",
+          "legacy_unit_key": "I",
+          "legacy_syllabus_path": "docs/syllabus/unit1.md",
+          "material_reference": null,
+          "topics": [
+            "Introduction to AI",
+            "Machine Learning",
+            "Deep Learning",
+            "Mathematical Foundations",
+            "Generative AI",
+            "Discriminative vs Generative Models",
+            "Evolution of Language Models",
+            "Tokenization",
+            "Embeddings",
+            "Transformers & Self-Attention",
+            "Foundation Models",
+            "BERT, GPT, LLaMA & Gemini",
+            "Applications of GenAI"
+          ],
+          "course_outcomes": [
+            {
+              "code": "CO1",
+              "description": "Explain the foundations of generative AI and large language models."
+            }
+          ],
+          "assessments": [
+            {
+              "assessment_id": "csa65-u1-quiz1",
+              "subject_id": "csa65",
+              "unit_id": "csa65-u1",
+              "title": "CSA65 Unit I — Fundamentals of Generative AI and LLMs",
+              "type": "quiz",
+              "status": "published",
+              "topics": [],
+              "question_bank_ref": "data/questions-unit1.json",
+              "material_reference": null,
+              "duration_minutes": 25,
+              "question_count": 15,
+              "question_types": [
+                "mcq",
+                "truefalse",
+                "multiselect",
+                "fillblank",
+                "descriptive",
+                "scenario",
+                "codeoutput",
+                "debugging",
+                "promptengineering"
+              ],
+              "difficulty": ["easy", "medium", "hard"],
+              "bloom_distribution": {
+                "remember": 20,
+                "understand": 20,
+                "apply": 20,
+                "analyze": 15,
+                "evaluate": 15,
+                "create": 10
+              },
+              "evaluation_mode": "auto+review",
+              "max_attempts": 1,
+              "randomization_mode": "seeded",
+              "shuffle_options": true,
+              "show_explanations": true,
+              "passing_percentage": 50,
+              "allow_review": true,
+              "negative_marking": { "enabled": false, "penaltyFraction": 0.25 },
+              "violation_policy": { "mode": "warn", "maxViolations": 3 },
+              "generate_pdf_report": true,
+              "_comment_legacy": "legacy_quiz_id keeps this assessment's localStorage progress/timer keys and its Firestore submission document ids identical to the ones data/config-unit1-quiz1.json already produces, so an in-progress attempt started before the registry existed is not orphaned by the migration.",
+              "legacy_quiz_id": "csa65-unit1-quiz1",
+              "legacy_config_file": "data/config-unit1-quiz1.json",
+              "created_at": "2026-10-08T00:00:00.000Z",
+              "updated_at": "2026-10-08T00:00:00.000Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

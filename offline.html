@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Offline · CSA65 Quiz Management System</title>
+<meta name="theme-color" content="#17181C">
+<script>(function(){try{var t=localStorage.getItem('csa65theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
+</head>
+<body>
+<div class="wrap">
+  <header class="app-header">
+    <div class="eyebrow">CSA65 · Generative AI and Large Language Models</div>
+    <h1>You're offline</h1>
+    <p>This page hasn't been saved for offline use yet.</p>
+  </header>
+
+  <div class="card">
+    <h2>What you can still do</h2>
+    <p>
+      The quiz app saves itself to your device the first time you open it while online.
+      Pages you've already visited will keep working without a connection — including
+      a quiz you're part-way through, since your answers are stored on this device, not
+      on the network.
+    </p>
+    <ul>
+      <li><strong>Any answers you've already typed are safe.</strong> They were saved locally as you went, and your quiz will resume where you left off.</li>
+      <li><strong>A submitted quiz is not lost either.</strong> If it couldn't reach the server, it's queued on this device and sent automatically the next time you open the app with a connection.</li>
+    </ul>
+    <div class="btn-row">
+      <button class="btn-primary" type="button" onclick="location.reload()">Try again</button>
+      <a class="btn-secondary" href="index.html" style="text-decoration:none; display:inline-block;">Go to home page</a>
+    </div>
+    <div class="footnote" id="statusLine">Checking connection…</div>
+  </div>
+</div>
+<script src="js/theme.js"></script>
+<script>
+  Theme.init();
+
+  // Reflect live connectivity, and retry automatically once a connection comes
+  // back, so a student who walks into Wi-Fi range doesn't have to notice this
+  // page at all. Two rules keep that convenience from doing harm — both of
+  // them found by actually running this page in a browser, not by reading it:
+  //
+  // 1. Only the 'online' EVENT retries, never the initial render. Reloading
+  //    because navigator.onLine happened to be true at load time is an
+  //    infinite loop: this file exists on the server, so reloading while
+  //    online just serves it again, which reloads again. The page never
+  //    settled.
+  //
+  // 2. A retry must never override a navigation the student already started.
+  //    Observed live: an 'online' event arriving while a tapped link was
+  //    in flight threw away the page they had asked for. So the retry waits a
+  //    moment and stands down if the document is already on its way out.
+  var statusLine = document.getElementById('statusLine');
+  var leaving = false;
+
+  window.addEventListener('pagehide', function () { leaving = true; });
+
+  function render() {
+    statusLine.textContent = navigator.onLine
+      ? 'Connection detected. Use “Try again” above to load the page you wanted.'
+      : 'No connection detected. This page will retry by itself once you are back online.';
+  }
+
+  window.addEventListener('online', function () {
+    if (leaving) return;
+    statusLine.textContent = 'Connection restored — retrying…';
+    setTimeout(function () {
+      if (leaving) return;
+      // reload(), not a jump to index.html: this page is standing in for the
+      // URL the student actually asked for, so retrying that same URL gets
+      // them where they were going rather than dumping them on the home page.
+      location.reload();
+    }, 600);
+  });
+  window.addEventListener('offline', render);
+  render();
+</script>
+</body>
+</html>
